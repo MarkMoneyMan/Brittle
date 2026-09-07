@@ -232,3 +232,60 @@ NEW_RULES = [
 ]
 
 RULES = RULES + NEW_RULES
+
+
+# --- Auto-extracted by sync_rules.py from release notes through 2026-09-03 ---
+RULES_AUTO_20260903 = [
+    {
+        'id': 'tool-choice-any-tool-unsupported-fable5-1',
+        'pattern': 'tool_choice[\'"]?\\s*[=:]\\s*[\'"]?(any|tool)[\'"]?',
+        'applies_if_model': ['claude-fable-5-1', 'claude-mythos-5-1'],
+        'severity': 'HIGH',
+        'deadline': 'already active',
+        'title': "tool_choice types 'any' and 'tool' return 400 on Fable 5.1 and Mythos 5.1",
+        'detail': "On Claude Fable 5.1 and Claude Mythos 5.1, sending tool_choice with type 'any' or 'tool' results in a 400 error. Only 'auto' and 'none' remain valid. Existing code that sets tool_choice to force tool use will break immediately when targeting these models.",
+        'fix': "Replace tool_choice 'any'/'tool' usage with strict tool use or structured outputs when calling claude-fable-5-1 or claude-mythos-5-1.",
+    },
+    {
+        'id': 'thinking-blocks-dropped-older-models',
+        'pattern': r"thinking",
+        'applies_if_model': None,
+        'severity': 'MEDIUM',
+        'deadline': 'already active',
+        'title': 'Thinking blocks produced by Fable 5.1/Mythos 5.1 are silently dropped when replayed to older models',
+        'detail': 'Thinking blocks produced by Claude Fable 5.1 or Claude Mythos 5.1 cannot be read by earlier models; if replayed to an earlier model, the API silently drops them. Code that passes thinking blocks across model versions expecting them to be preserved will silently lose those blocks.',
+        'fix': 'Ensure thinking blocks from Fable 5.1/Mythos 5.1 are only replayed to Fable 5.1, Mythos 5.1, or newer models, and not to any earlier model in multi-turn or cross-model workflows.',
+    },
+    {
+        'id': 'thinking-block-prefix-mismatch-400-new-accounts',
+        'pattern': r"thinking",
+        'applies_if_model': ['claude-fable-5-1'],
+        'severity': 'HIGH',
+        'deadline': 'already active',
+        'title': 'Replaying thinking blocks after system/tools/messages change returns 400 for accounts created on/after Aug 31 2026',
+        'detail': 'On Claude Fable 5.1, the API validates that nothing before a thinking block has changed when it is replayed. For accounts created on or after August 31, 2026, replaying a thinking block after the system prompt, tools, or an earlier message has changed results in a 400 error. Code that mutates these fields between turns while reusing cached thinking blocks will break.',
+        'fix': 'Do not replay thinking blocks in conversations where the system prompt, tools list, or any earlier message has changed; clear thinking blocks when any prefix content is modified.',
+    },
+    {
+        'id': 'zero-data-retention-unavailable-fable5-1-mythos5-1',
+        'pattern': r"zero.?data.?retention|zdr|data_retention",
+        'applies_if_model': ['claude-fable-5-1', 'claude-mythos-5-1'],
+        'severity': 'HIGH',
+        'deadline': 'already active',
+        'title': 'Claude Fable 5.1 and Mythos 5.1 require 30-day data retention and are unavailable under zero data retention',
+        'detail': 'Like Claude Fable 5, both Claude Fable 5.1 and Claude Mythos 5.1 require 30-day data retention and are not available under zero data retention configurations unless expressly authorized by Anthropic. Code or deployments configured for zero data retention that attempt to use these models will be unable to do so.',
+        'fix': 'Remove zero data retention configuration when using claude-fable-5-1 or claude-mythos-5-1, or obtain express authorization from Anthropic before deploying these models in a zero data retention context.',
+    },
+    {
+        'id': 'anthropic-version-header-required-admin-analytics-compliance-api',
+        'pattern': r"(?:admin|analytics|compliance)[_/.-]?(?:api|endpoint)|/v1/(?:users|spend|analytics|compliance)",
+        'applies_if_model': None,
+        'severity': 'MEDIUM',
+        'deadline': 'already active',
+        'title': 'anthropic-version header now required on Admin, Analytics, and Compliance API endpoints',
+        'detail': 'The guides for the Admin API (user management and spend limits), the Claude Enterprise Analytics API, and the Compliance API now specify that the anthropic-version header must be sent on every request, consistent with the rest of the Claude API. Existing client code that omits this header on these endpoints may start receiving errors.',
+        'fix': 'Add the anthropic-version header to all requests sent to Admin API, Analytics API, and Compliance API endpoints, matching the pattern already used for the core Claude API.',
+    },
+]
+
+RULES = RULES + RULES_AUTO_20260903

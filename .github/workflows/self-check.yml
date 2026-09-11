@@ -1,15 +1,17 @@
 name: self-check
 
-# Dogfoods action.yml against this repo itself, on every push/PR. Four
+# Dogfoods action.yml against this repo itself, on every push/PR. Five
 # jobs, all really assertions about the tool's own correctness (not about
 # this repo's code health): one path is known to contain real Anthropic-
 # rule findings and must fail the severity gate, one specifically checks
 # the OpenAI rules by name (not just "some rule fired" — see that job's
 # comment for why), one path is known to be clean and must pass the gate,
-# and one installs the pip package (pyproject.toml) fresh and checks the
+# one installs the pip package (pyproject.toml) fresh and checks the
 # installed console scripts behave the same as running the scripts
-# directly. If any assumption stops holding, that's a regression to fix,
-# not a real finding to triage.
+# directly, and one is a permanent regression test for the string-literal
+# false-positive gap closed on 2026-09-11 (see README's "Closing the
+# string-literal gap in generic_scan() itself"). If any assumption stops
+# holding, that's a regression to fix, not a real finding to triage.
 
 on:
   push:
@@ -79,6 +81,59 @@ jobs:
             exit 1
           fi
           echo "OK: 0 findings on the known-clean fixture, as expected."
+
+  expect-no-string-literal-false-positives:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run against fixture 1 (no real SDK usage, every trigger string is unrelated log text)
+        id: scan1
+        uses: ./
+        with:
+          path: pipeline_runs/string_literal_audit_fixture.py
+          fail-on: HIGH
+      - name: Assert zero findings on fixture 1
+        run: |
+          if [ "${{ steps.scan1.outputs.findings-count }}" != "0" ]; then
+            echo "::error::Expected 0 findings on string_literal_audit_fixture.py, got ${{ steps.scan1.outputs.findings-count }}. This fixture plants 7 rules' trigger text purely inside unrelated logger.info(...) strings — any finding here means the string-literal masking fix in generic_scan() (_mask_string_literals in ast_scan.py) has regressed. See README's 'Closing the string-literal gap' section."
+            exit 1
+          fi
+          echo "OK: 0 findings on fixture 1, as expected."
+      - name: Run against fixture 2 (real anthropic/openai SDK usage alongside unrelated log strings)
+        id: scan2
+        uses: ./
+        with:
+          path: pipeline_runs/string_literal_audit_fixture2.py
+          fail-on: HIGH
+      - name: Assert only the 3 deliberately-exempted rules fired, and none of the fixed ones came back
+        run: |
+          # Fixture 2 legitimately references anthropic/openai for real, so it
+          # exercises the harder case: rules gated by "this file references
+          # anthropic/openai" (GENERIC_EXTRA_CONDITIONS) don't get protected by
+          # that gate alone here, only by the string masking. Exactly 3
+          # findings are expected: the 3 rules in GENERIC_RULES_MATCH_INSIDE_STRINGS
+          # that are deliberately still allowed to match inside string
+          # contents (documented residual false-positive risk, not a bug).
+          if [ "${{ steps.scan2.outputs.findings-count }}" != "3" ]; then
+            echo "::error::Expected exactly 3 findings on string_literal_audit_fixture2.py (the 3 deliberately-exempted rules), got ${{ steps.scan2.outputs.findings-count }}."
+            exit 1
+          fi
+          json_path="${{ steps.scan2.outputs.findings-json }}"
+          for rule_id in python-sdk-v1-min-python-version memory-list-managed-agents-header-behavior-change computer-use-toolset-new-shape; do
+            if ! grep -q "\"$rule_id\"" "$json_path"; then
+              echo "::error::Expected exempted rule_id '$rule_id' to fire on string_literal_audit_fixture2.py but it wasn't there — check GENERIC_RULES_MATCH_INSIDE_STRINGS in ast_scan.py."
+              exit 1
+            fi
+          done
+          # The actual regression check: these rule_ids were false-firing on
+          # string-literal content before the fix and must never appear here.
+          for rule_id in beta-files-skills-sdk-shape-change python-sdk-v1-bedrock-no-default-region python-sdk-v1-compaction-control-removed python-sdk-v1-httpx-to-httpx2 openai-httpx-to-httpx2 openai-v2-tool-call-output-type-widened openai-v1-error-classes-renamed python-sdk-v1-async-with-raw-response openai-v1-legacy-module-level-calls-removed; do
+            if grep -q "\"$rule_id\"" "$json_path"; then
+              echo "::error::rule_id '$rule_id' fired on string_literal_audit_fixture2.py, matching only unrelated log text. This is exactly the string-literal false-positive bug class fixed on 2026-09-11 — it has regressed."
+              exit 1
+            fi
+          done
+          echo "OK: exactly the 3 exempted rules fired, and none of the 9 previously-fixed rules matched string-literal content."
 
   package-installs-and-runs:
     runs-on: ubuntu-latest

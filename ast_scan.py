@@ -21,6 +21,7 @@ drowning real findings in noise.
 
 import argparse
 import ast
+import copy
 import json
 import re
 import sys
@@ -59,6 +60,61 @@ GENERIC_RULE_EXCLUDE_IDS = {
     "fast-mode-removed-opus-4-7",
     "model-tentative-retirement-sonnet45",
 }
+
+# Real bug, found by deliberately auditing for it rather than waiting to hit
+# it live (see pipeline_runs/string_literal_audit_fixture*.py): the same
+# false-positive class first found in openai-v1-legacy-module-level-calls-
+# removed (a rule's pattern matching text that merely appears *inside a
+# string literal* — a log message, a metadata dict value — rather than in
+# real code) turned out not to be a one-off. Testing every generic-path rule
+# against fixtures built the same way as that real litellm bug found 10 of
+# the 12 rules vulnerable. generic_scan() now regexes a *structural* version
+# of each node's text by default — string-literal contents blanked out
+# before matching — which closes it for 8 of those 10 with zero loss of real
+# detections, because their trigger text is only ever legitimate as code
+# (an attribute chain, a constructor call, a keyword name), never as a
+# string's value.
+#
+# The other 3 rules below are the genuine exception, not an oversight: their
+# real, legitimate signal *is* a string's value (a setup.py classifier, an
+# actual header value, a type-tag string), so blanking string contents would
+# silently turn off true detection, not just suppress false positives. They
+# keep matching against the raw, unmasked text instead, with the residual
+# risk (a rule could still match inside an unrelated descriptive string)
+# left open and stated here rather than quietly fixed — same honesty
+# standard as every other documented gap in this project. A future,
+# sharper fix would check the match sits in the right structural position
+# (e.g. the value of a dict key literally named "type" or "anthropic-beta")
+# rather than accepting any string on the node — not attempted yet.
+GENERIC_RULES_MATCH_INSIDE_STRINGS = {
+    "python-sdk-v1-min-python-version",
+    "memory-list-managed-agents-header-behavior-change",
+    "computer-use-toolset-new-shape",
+}
+
+
+def _mask_string_literals(node):
+    """Deep-copy `node` with every string-literal / f-string sub-node's
+    content blanked out, so re-unparsing it reflects only the real code
+    shape (calls, attribute access, keyword names, identifiers) — never the
+    *contents* of a string a rule's pattern might coincidentally match
+    inside. See GENERIC_RULES_MATCH_INSIDE_STRINGS above for why this isn't
+    applied to every rule.
+
+    Known gap, stated plainly: an f-string's FormattedValue can itself
+    contain a real, live expression (`f"...{some_real_call()}..."`) — that
+    gets blanked away along with the rest of the f-string, not preserved.
+    Accepted trade-off: "the real signal is a call embedded inside an
+    f-string" is a much rarer shape than the false positive this closes.
+    """
+    node = copy.deepcopy(node)
+    for child in ast.walk(node):
+        if isinstance(child, ast.Constant) and isinstance(child.value, str):
+            child.value = ""
+        elif isinstance(child, ast.JoinedStr):
+            child.values = []
+    return node
+
 
 # Node types whose *own* unparsed text becomes a match candidate for the
 # generic engine. Deliberately narrow: these are real, executable pieces of
@@ -349,12 +405,25 @@ def generic_scan(tree, path, rules):
             snippet = ast.unparse(node)
         except Exception:
             continue
+        # Structural version of the same snippet, string-literal contents
+        # blanked out — the default match target for every generic-path
+        # rule except the small, deliberate exception list above. Falls
+        # back to the raw snippet if masking itself fails for some reason,
+        # rather than silently dropping the node from consideration.
+        try:
+            structural_snippet = ast.unparse(_mask_string_literals(node))
+        except Exception:
+            structural_snippet = snippet
 
         for rule in rules:
             if rule["id"] in GENERIC_RULE_EXCLUDE_IDS:
                 continue
+            match_text = (
+                snippet if rule["id"] in GENERIC_RULES_MATCH_INSIDE_STRINGS
+                else structural_snippet
+            )
             try:
-                if not re.search(rule["pattern"], snippet):
+                if not re.search(rule["pattern"], match_text):
                     continue
             except re.error:
                 # An auto-extracted regex isn't guaranteed valid — skip that

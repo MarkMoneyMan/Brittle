@@ -592,12 +592,11 @@ one specific OpenAI rule can't hide behind some other rule still firing.
 {...}}` (migrated automatically from the old flat one-provider shape,
 tested against a simulated old file, not just assumed).
 
-**What's explicitly not done yet, stated plainly:** the string-literal
-false-positive class found in bug #4 is a real gap in `generic_scan()`
-itself, not just this one rule — it hasn't been audited across the other
-21 rules to see whether any of them are exposed to it too (none have
-shown it in the repos tested so far, but "not yet observed" isn't the
-same as "doesn't happen"). JS/TS support for OpenAI is still untested —
+**Update: the string-literal false-positive class from bug #4 was audited
+across every other rule, not left as an open question** — see "Closing the
+string-literal gap in `generic_scan()` itself" below for what that found
+and how it was fixed generally instead of rule-by-rule. JS/TS support for
+OpenAI is still untested —
 `js_scanner/` only knows the Anthropic rule set right now — and the
 OpenAI side of rule sync hasn't been proven against a real *new*
 breaking change yet (unlike Anthropic's, which was — see "Rule sync"
@@ -608,6 +607,87 @@ real end-to-end test whenever openai-python next ships a version with an
 actual `⚠ BREAKING CHANGES` section and the Monday schedule (or a manual
 run) picks it up — same "this part waits for something real to happen"
 honesty already applied to Anthropic's own first automated run.
+
+## Closing the string-literal gap in `generic_scan()` itself
+
+The false positive in bug #4 above (litellm's PromptLayer integration
+logging `"openai.ChatCompletion.create"` as metadata, matched because
+`generic_scan()` regexes a node's whole unparsed text — real code and any
+string literal it contains, alike) was flagged at the time as a real,
+unaudited risk across the other rules, not something to assume was a
+one-off. It wasn't. Built two fixtures
+(`pipeline_runs/string_literal_audit_fixture.py` and `..._fixture2.py`)
+that plant every generic-path rule's trigger text purely as a string
+literal's value — a log message, a metadata dict — structurally identical
+to the real bug, never as real code that actually does the thing. Ran them
+through `generic_scan()` for real rather than reasoning about it in the
+abstract: **10 of the 12 rules that go through the generic engine fired on
+text that was never real code.**
+
+Fixed generally, not one regex guard per rule. `generic_scan()` now builds
+a *structural* version of each candidate node's text — every string
+literal and f-string's contents blanked out before the node is
+re-unparsed — and matches every generic-path rule's pattern against that
+by default (`_mask_string_literals()` in `ast_scan.py`). For 7 of the 10
+vulnerable rules (`beta-files-skills-sdk-shape-change`,
+`python-sdk-v1-bedrock-no-default-region`,
+`python-sdk-v1-compaction-control-removed`,
+`python-sdk-v1-httpx-to-httpx2`, `openai-httpx-to-httpx2`,
+`openai-v2-tool-call-output-type-widened`,
+`openai-v1-error-classes-renamed`), this closes the gap with **zero loss
+of real detection** — confirmed by re-running both audit fixtures (all 10
+false positives gone) and every existing fixture that has known true
+positives (`example_project/`, `example_project/openai_bot.py`,
+`ci_fixtures/known_clean.py`) and getting byte-identical results to before
+the fix. That's possible because these 7 rules' real signal is always
+*code shape* — an attribute chain, a constructor call, a keyword name —
+never a string's value, so masking string contents away only removes the
+places a false positive could hide, not the places a real one lives.
+Masking is applied by default to every generic-path rule that isn't
+explicitly exempted, which also closes the previously-documented residual
+gap in `python-sdk-v1-async-with-raw-response` as a bonus (its existing
+`GENERIC_EXTRA_CONDITIONS` check only ever confirmed "this file references
+anthropic somewhere," not that the matched text itself was real code) —
+it didn't show up as one of the 10 in this specific test only because
+that test's fixture happened not to combine an unrelated string with a
+real anthropic import in the same async function, not because the gap
+wasn't real.
+
+**The other 3 of the 10 are the genuine exception, stated plainly rather
+than swept into the same fix:** `python-sdk-v1-min-python-version` (real
+signal: a `Programming Language :: Python :: 3.x` classifier string in
+`setup.py`) and `computer-use-toolset-new-shape` /
+`memory-list-managed-agents-header-behavior-change` (real signal: an
+actual header or type-tag *string value*, e.g. `"anthropic-beta":
+"managed-agents-2026-04-01"`) have real, legitimate matches that live
+*inside* a string literal's value, not just coincidentally. Masking
+string contents for these would silently turn off true detection instead
+of just suppressing false positives — worse than the bug it would fix. A
+new set, `GENERIC_RULES_MATCH_INSIDE_STRINGS`, opts these three out of
+masking, so they keep matching the raw unmasked text with the residual
+risk left open and documented rather than quietly patched: they can still
+match inside an unrelated descriptive string (confirmed live — both still
+fire on the audit fixtures' deliberately-unrelated log lines). A sharper
+future fix would check the match sits in the right structural position
+(the value of a dict key literally named `"type"` or containing `"beta"`)
+rather than accepting any string on the node at all — not attempted yet,
+scoped out for time.
+
+**Cost of the fix, stated honestly:** every candidate node now gets
+deep-copied and re-unparsed a second time to build the structural
+snippet, on top of the existing unparse. Full-repo litellm scan time went
+from noticeably under this to **2m39s** — real, measurable, and worth
+knowing about before pointing this at a very large monorepo in CI, though
+still well within what a per-PR CI check can absorb for a repo of normal
+size. Re-ran the full litellm scan after the fix as a regression check
+too, not just the two audit fixtures: 60 findings across the merged rule
+set, all consistent with the shapes already documented above — no
+unexplained swing in either direction.
+
+The two audit fixtures are kept in `pipeline_runs/` as permanent
+regression fixtures, not deleted after use — a future change to
+`generic_scan()` that reopens this gap for any of the 8 fixed rules should
+be caught by re-running them, the same principle as `ci_fixtures/known_clean.py`.
 
 ## Rule sync
 

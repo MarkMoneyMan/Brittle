@@ -135,9 +135,12 @@ an `ANTHROPIC_API_KEY` to run for real.
   theorized: litellm's own Anthropic integration (HTTP-level, not
   SDK-level) and a legacy Node.js prototype inside `oddsscanner`
   (`server.js`) both produce 0 findings for this reason, not because
-  they're actually safe. A future rule format that also matches literal
-  header/param strings in a raw request body could close part of this,
-  but nothing like that exists yet.
+  they're actually safe. **Update (2026-09-11): a narrower fix — just
+  flag that a raw-HTTP integration exists at all, not try to replicate
+  the full rule catalog inside it — was attempted and rejected after
+  real testing, not left untried.** See "Investigated and rejected: a
+  raw-HTTP advisory rule" below for what was actually built, tested, and
+  why it didn't survive contact with real code.
 - Python only for detection; JS/TS added as a first pass (see below), no
   Go/other-language support.
 - Rule *sync* runs on a schedule now (`sync_rules.py` +
@@ -794,6 +797,83 @@ The two audit fixtures are kept in `pipeline_runs/` as permanent
 regression fixtures, not deleted after use — a future change to
 `generic_scan()` that reopens this gap for any of the 8 fixed rules should
 be caught by re-running them, the same principle as `ci_fixtures/known_clean.py`.
+
+## Investigated and rejected: a raw-HTTP advisory rule
+
+Same day as the string-literal fix above, went after the raw-HTTP blind
+spot documented in "Known limitations" — deliberately the narrow version:
+not trying to replicate the whole breaking-change catalog inside a raw
+request body (rejected upfront, after reading `oddsscanner`'s real
+`server.js`: its request body is a plain pass-through variable, not a
+literal, so there's no visible shape to check even with raw-HTTP
+awareness), just flagging that a raw-HTTP integration to
+`api.anthropic.com`/`api.openai.com` exists at all, LOW severity, so a
+human knows to check it by hand. Built as two new rules
+(`raw-http-anthropic-integration-detected` / `raw-http-openai-integration-detected`)
+reusing the exact same `generic_scan()` pipeline as everything else —
+architecturally the cheap part. **Rejected after testing, not shipped —
+this section documents why, the same honesty standard as the kwargs-handling
+correction earlier in this README.**
+
+First version (any `Call`/`Assign`/`AnnAssign` node containing the literal
+domain string, no extra precondition) against `litellm`: **665 of 725
+total findings** — almost all noise. Inspecting real hits, not just the
+count: the large majority were `api_base = ... or "https://api.openai.com/v1"`-style
+default-fallback constants, a completely ordinary, safe pattern for a
+configurable client, not a raw-HTTP call site at all.
+
+Second version, restricted to `Call` nodes only: still **495 findings**.
+Root cause this time: `httpx.Request(method="POST", url="https://api.openai.com/v1")` —
+litellm's own exception-handling code builds a *placeholder* Request
+object purely to attach to an error it's raising, never sent over the
+network. Checked litellm's actual real HTTP call sites directly
+(`llms/anthropic/`, `llms/openai/`) to see if a tighter rule would at
+least catch the real thing this whole feature exists for — even there,
+the *only* place the bare domain string appears is this same
+Request()-for-error-reporting pattern. The genuine outgoing call doesn't
+expose the domain as a literal at its real call site at all (almost
+certainly built from a `base_url` configured once elsewhere, exactly the
+same data-flow-tracking problem already out of scope for this project —
+see the `**kwargs` limitation above).
+
+Third version, restricted to `Call` nodes whose trailing callee name is an
+actual send-shaped verb (`get`/`post`/`put`/`patch`/`delete`/`request`/
+`urlopen`/`send`, explicitly excluding bare `Request(...)` construction):
+down to **14 findings**. Inspected every one, not a sample — 13 of 14 were
+test-mocking infrastructure (`respx.post(...)`, `patch(..., return_value=...)`,
+a test HTTP client's `.post(...)`) verifying litellm's real behavior
+against these domains, not production code bypassing the SDK. The 14th,
+`claims.get('https://api.openai.com/auth')`, is a JWT claims-dict lookup —
+`dict.get()` sharing a method name with the HTTP verb `GET`, a real false
+positive of exactly the kind a narrower verb whitelist was meant to avoid,
+still slipping through.
+
+**The disqualifying result, checked directly rather than assumed:**
+re-ran the same verb-whitelist idea (prototyped standalone, never merged)
+against `oddsscanner/server.js` — the actual, real, originally-confirmed
+motivating example. **Zero matches.** `server.js` calls the domain through
+a custom-named wrapper function (`fetchUrl(url, options)`), not a
+whitelisted HTTP-library method name. The same callee-name filter narrow
+enough to exclude the `dict.get()`/`Request()` false positives is also
+narrow enough to exclude the one real case this rule existed to catch —
+and broadening it back out reopens the noise, confirmed by testing the
+same idea (any `Call`, no verb filter) against `vercel/ai` and
+`anthropic-sdk-typescript`: 340 and 59 findings respectively, effectively
+all inside `.test.ts` files (mock-server base URLs for each SDK's own test
+suite), matching the Python results almost exactly.
+
+**Conclusion: this isn't a tuning problem, it's a structural dead end for
+this technique.** Real code either configures a base URL once and calls
+relative paths after (invisible to a literal-string match, no matter how
+it's scoped) or wraps the raw call in an arbitrarily-named helper function
+(invisible to any callee-name whitelist tight enough to avoid test-mock
+and placeholder-object noise). Every version tried sits somewhere on that
+same trade-off, and none of them land in a useful spot. All of it reverted
+— `rules.py`, `rules_openai.py`, and `ast_scan.py` are back to exactly
+what they were before this investigation started; nothing shipped. The
+raw-HTTP blind spot documented in "Known limitations" stays open, now with
+real evidence behind *why* a seemingly-obvious narrow fix doesn't work,
+instead of just an untested idea sitting there.
 
 ## Rule sync
 

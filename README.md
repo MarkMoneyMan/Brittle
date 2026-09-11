@@ -143,9 +143,13 @@ an `ANTHROPIC_API_KEY` to run for real.
 - Rule *sync* runs on a schedule now (`sync_rules.py` +
   `update-rules.yml`), but every extracted rule still goes through a PR a
   human reviews before it's live — deliberately not fully unattended.
-- OpenAI support (`rules_openai.py`) is new, small (4 rules), hand-seeded
-  rather than auto-extracted, and Python-only — not yet wired into rule
-  sync, CI self-check, or the JS/TS scanner. See "Multi-provider support"
+- OpenAI support (`rules_openai.py`) is still small (4 rules) and
+  Python-only. IS wired into rule sync and CI self-check now (this bullet
+  was wrong on that point until 2026-09-11 — "Multi-provider support"
+  below documented the fix correctly but this summary line never got
+  updated to match, a real doc-drift bug caught auditing this section, not
+  a new claim); the one genuinely open gap is the JS/TS scanner, which
+  still only knows the Anthropic rule set. See "Multi-provider support"
   below for exactly what's been tested and what hasn't.
 
 ## Validated against

@@ -158,6 +158,115 @@ const GENERIC_CANDIDATE_TYPES = new Set([
   "VariableDeclarator",
 ]);
 
+// NOT a straight port of ast_scan.py's GENERIC_RULES_MATCH_INSIDE_STRINGS
+// (2026-09-11) — turned out to need real, empirical re-derivation for this
+// scanner, not just copying the Python set, and that mattered: the first
+// version of this set only had the 2 rules below (Python's non-hand-coded
+// equivalents), and running it against a real-usage fixture immediately
+// broke model-deprecated-sonnet4-opus4 (a true positive on bot.ts:33
+// silently disappeared). Root cause is architectural, not a porting typo:
+// on the Python side, every model-name/config-value rule
+// (sdk-v1-sampling-params-removed and friends) is hand-coded in
+// scan_source() using find_calls()/get_kwargs() — real AST field access to
+// the actual keyword argument value, never regex-on-text at all, so
+// whether that value happens to be a string literal is irrelevant to it.
+// rules_js.js has no equivalent hand-coded path for any of its
+// model-name/config rules — every one of them goes through this same
+// generic regex-on-snippet loop, which means several rules whose true
+// signal legitimately lives inside a plain string value (a model name
+// literal, a "fast"/"xhigh"/"disabled" config string, a URL path string)
+// need to be exempted here that have no Python-side counterpart to copy
+// from. Confirmed each one empirically (a synthetic real-usage snippet per
+// rule, not just reasoned about) before adding it:
+const GENERIC_RULES_MATCH_INSIDE_STRINGS = new Set([
+  "model-retired-opus-4-1", // model name is always a string literal
+  "model-deprecated-sonnet4-opus4", // same — the regression that caught this whole issue
+  "fast-mode-removed-opus-4-7", // model name string + `speed: "fast"` string
+  "opus5-effort-xhigh-thinking-disabled", // `type: "disabled"` / `effort: "xhigh"` are string values
+  "experimental-endpoint-retiring", // the retired path is a URL string literal
+  "memory-list-managed-agents-header-behavior-change", // header value is a string literal
+  "computer-use-toolset-new-shape", // tool "type" value is a string literal
+]);
+// Confirmed the OTHER 4 rules are genuinely code-shape, not string-value,
+// so masking is safe (and correctly closes their false-positive risk)
+// for: manual-thinking-budget (matches the `budget_tokens` property name,
+// never quoted), beta-files-skills-sdk-shape-change (`client.beta.files`
+// attribute access), assistant-prefill-removed (excluded from this loop
+// entirely, see GENERIC_RULE_EXCLUDE_IDS above), and
+// openai-v2-tool-call-output-type-widened (a type name in an import
+// specifier/type annotation — an identifier, not a string — which is
+// exactly the rule this whole masking fix was built to protect).
+
+// Deliberately NOT using @babel/traverse for this inner walk (even though
+// it's already a dependency) — traverse() builds a scope map as it goes,
+// and that's exactly what already crashed once on valid-but-unusual TS in
+// a real repo (see the crash documented in checkAssistantPrefill's sibling
+// bug list / README's "JS/TS support", bug #1). A plain recursive walk
+// over own-enumerable-properties needs no scope tracking at all, so it
+// can't hit that failure mode — safer for a helper that runs on every
+// single candidate node, not just once per file.
+function collectStringLiteralSpans(node, spans) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectStringLiteralSpans(item, spans);
+    return;
+  }
+  if (typeof node.type !== "string") return;
+  if (node.type === "StringLiteral") {
+    if (typeof node.start === "number" && typeof node.end === "number") {
+      spans.push([node.start, node.end, '""']);
+    }
+    return; // a string literal has no children worth recursing into
+  }
+  if (node.type === "TemplateLiteral") {
+    // Blanks the WHOLE template, quasis and any embedded ${...}
+    // expressions alike — same trade-off ast_scan.py's _mask_string_literals
+    // makes for f-strings/JoinedStr, stated there just as plainly: a
+    // template literal's real, live expression (`` `...${someRealCall()}...` ``)
+    // gets blanked away along with the rest of it, not preserved. Accepted
+    // for the same reason: "the real signal is a call embedded inside a
+    // template literal" is a much rarer shape than the false positive this
+    // closes.
+    if (typeof node.start === "number" && typeof node.end === "number") {
+      spans.push([node.start, node.end, "``"]);
+    }
+    return;
+  }
+  for (const key of Object.keys(node)) {
+    if (key === "loc" || key === "start" || key === "end" || key === "type" || key === "range") continue;
+    collectStringLiteralSpans(node[key], spans);
+  }
+}
+
+// Returns `rawSnippet` with every string-literal / template-literal
+// sub-span blanked out, so pattern-matching it reflects only the real code
+// shape (calls, property access, identifiers, keyword names) — never the
+// *contents* of a string a rule's pattern might coincidentally match
+// inside. `nodeStart` is the candidate node's own `.start` offset, needed
+// to convert each found span's file-absolute offsets into offsets relative
+// to `rawSnippet` (which begins at `nodeStart`). On any inconsistency
+// (a span that doesn't fit cleanly inside rawSnippet — shouldn't happen,
+// but this runs on every candidate node in every file, so fail safe rather
+// than throw) that one span is skipped rather than corrupting the whole
+// snippet.
+function buildStructuralSnippet(node, rawSnippet, nodeStart) {
+  const spans = [];
+  collectStringLiteralSpans(node, spans);
+  if (spans.length === 0) return rawSnippet;
+  spans.sort((a, b) => a[0] - b[0]);
+  let result = rawSnippet;
+  // Splice from the end backwards so earlier offsets in `spans` stay valid
+  // as later (higher-offset) replacements change the string's length.
+  for (let i = spans.length - 1; i >= 0; i--) {
+    const [start, end, replacement] = spans[i];
+    const relStart = start - nodeStart;
+    const relEnd = end - nodeStart;
+    if (relStart < 0 || relEnd > result.length || relStart >= relEnd) continue;
+    result = result.slice(0, relStart) + replacement + result.slice(relEnd);
+  }
+  return result;
+}
+
 function findingObj(file, line, code, rule, titleOverride) {
   return {
     file,
@@ -240,6 +349,12 @@ function scanSource(filePath, code) {
         if (node.end - node.start > 2000) return;
 
         const snippet = code.slice(node.start, node.end);
+        // Used for regex matching in place of `snippet` for every rule
+        // except the ones in GENERIC_RULES_MATCH_INSIDE_STRINGS — see that
+        // set's comment above. `snippet` itself is untouched and still used
+        // for display (findingObj below) and for isMessagesCall/model
+        // detection just below, same as before this existed.
+        const structuralSnippet = buildStructuralSnippet(node, snippet, node.start);
         // A model literal is only meaningful when this exact node is a
         // messages.create()/completions.create() call — not inherited from
         // anywhere else in the file (the mistake v1's Python scanner made).
@@ -261,7 +376,8 @@ function scanSource(filePath, code) {
 
         for (const rule of RULES_JS) {
           if (GENERIC_RULE_EXCLUDE_IDS.has(rule.id)) continue;
-          if (!rule.pattern.test(snippet)) continue;
+          const matchText = GENERIC_RULES_MATCH_INSIDE_STRINGS.has(rule.id) ? snippet : structuralSnippet;
+          if (!rule.pattern.test(matchText)) continue;
 
           let title = rule.title;
           if (rule.appliesIfModel) {

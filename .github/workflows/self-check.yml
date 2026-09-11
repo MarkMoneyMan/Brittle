@@ -10,10 +10,11 @@ name: self-check
 # installed console scripts behave the same as running the scripts
 # directly, one is a permanent regression test for the string-literal
 # false-positive gap closed on 2026-09-11 (see README's "Closing the
-# string-literal gap in generic_scan() itself"), and one checks the OpenAI
-# JS/TS rule by name AND is the first CI-covered proof scan-js: "true"
-# works at all. If any assumption stops holding, that's a regression to
-# fix, not a real finding to triage.
+# string-literal gap in generic_scan() itself"), and one checks every
+# RULES_JS rule by name (and, since 2026-09-11, is also the regression
+# test for ast_scan.js's own string-literal masking fix) AND is the first
+# CI-covered proof scan-js: "true" works at all. If any assumption stops
+# holding, that's a regression to fix, not a real finding to triage.
 
 on:
   push:
@@ -137,15 +138,24 @@ jobs:
           done
           echo "OK: exactly the 3 exempted rules fired, and none of the 9 previously-fixed rules matched string-literal content."
 
-  expect-openai-js-rule-fires-on-js-fixture:
+  expect-all-js-rules-fire-on-js-fixtures:
     # Also the first CI-covered proof that inputs.scan-js: "true" actually
     # works end-to-end in a real Actions run at all (action.yml's JS/TS
     # path — Node setup, npm install, ast_scan.js — was previously only
-    # ever exercised manually/locally; see README's "JS/TS support").
+    # ever exercised manually/locally; see README's "JS/TS support"). And,
+    # since 2026-09-11, the permanent regression test for the string-
+    # literal masking fix in ast_scan.js: js_scanner/example_project/ now
+    # has real-usage coverage for all 11 RULES_JS rules (4 of them had
+    # never been exercised by any TS fixture before that work), plus
+    # string_literal_audit_fixture.ts, which plants the 3 genuinely
+    # code-shape rules' trigger text purely in unrelated console.log
+    # strings and must contribute exactly 0 findings — expects exactly 11
+    # total findings, one per rule, checked by id so a silently-broken
+    # rule can't hide behind some other rule still failing the gate.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run claude-api-guard (with scan-js) against js_scanner/example_project/ (known findings, both providers)
+      - name: Run claude-api-guard (with scan-js) against js_scanner/example_project/ (known findings, all providers)
         id: scan
         continue-on-error: true
         uses: ./
@@ -153,18 +163,24 @@ jobs:
           path: js_scanner/example_project
           scan-js: "true"
           fail-on: HIGH
-      - name: Assert the severity gate failed AND the OpenAI JS/TS rule actually fired
+      - name: Assert the severity gate failed AND exactly the 11 expected rule_ids fired (no more, no fewer)
         run: |
           if [ "${{ steps.scan.outcome }}" != "failure" ]; then
             echo "::error::Expected the HIGH-severity gate to fail against js_scanner/example_project/ (bot.ts has known HIGH findings), but the step outcome was '${{ steps.scan.outcome }}'."
             exit 1
           fi
-          json_path="${{ steps.scan.outputs.findings-json }}"
-          if ! grep -q "\"openai-v2-tool-call-output-type-widened\"" "$json_path"; then
-            echo "::error::Expected rule_id 'openai-v2-tool-call-output-type-widened' in $json_path (openai_bot.ts's real type import at line 7) but it wasn't there — check rules_js.js's OpenAI block and that scan-js: \"true\" actually ran the JS/TS scanner."
+          if [ "${{ steps.scan.outputs.findings-count }}" != "11" ]; then
+            echo "::error::Expected exactly 11 findings (one per RULES_JS rule) on js_scanner/example_project/, got ${{ steps.scan.outputs.findings-count }}. Either a rule stopped firing on its real-usage fixture, or string_literal_audit_fixture.ts started producing false positives again — see this job's comment."
             exit 1
           fi
-          echo "OK: gate correctly failed, and the OpenAI JS/TS rule fired on openai_bot.ts as expected."
+          json_path="${{ steps.scan.outputs.findings-json }}"
+          for rule_id in model-retired-opus-4-1 model-deprecated-sonnet4-opus4 fast-mode-removed-opus-4-7 opus5-effort-xhigh-thinking-disabled manual-thinking-budget assistant-prefill-removed experimental-endpoint-retiring beta-files-skills-sdk-shape-change memory-list-managed-agents-header-behavior-change computer-use-toolset-new-shape openai-v2-tool-call-output-type-widened; do
+            if ! grep -q "\"$rule_id\"" "$json_path"; then
+              echo "::error::Expected rule_id '$rule_id' in $json_path but it wasn't there — check rules_js.js and its real-usage fixture in js_scanner/example_project/."
+              exit 1
+            fi
+          done
+          echo "OK: gate correctly failed, and all 11 RULES_JS rules fired exactly once each, by name."
 
   package-installs-and-runs:
     runs-on: ubuntu-latest

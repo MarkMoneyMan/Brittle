@@ -149,8 +149,9 @@ an `ANTHROPIC_API_KEY` to run for real.
   scanner now knows exactly 1 OpenAI rule (`openai-v2-tool-call-output-type-widened`,
   added 2026-09-11), not the other 3 — those are Python-implementation-level,
   not API-level, same reasoning that keeps several Python-only Anthropic
-  rules out of `rules_js.js` too. That 1 rule also has a confirmed (not
-  theorized) string-literal false-positive risk not yet closed for JS/TS.
+  rules out of `rules_js.js` too. The JS/TS scanner's string-literal
+  false-positive gap (confirmed the same day this rule was added) is
+  closed now, same day — see "JS/TS support" for what that fix found.
   See "JS/TS support" and "Multi-provider support" below for exactly
   what's been tested and what hasn't.
 
@@ -504,12 +505,8 @@ name only inside a `console.log` string, never a real import — **it
 false-positives**, confirming (not just theorizing) that this scanner has
 the same string-literal-matching gap already found and fixed on the
 Python side (see "Closing the string-literal gap in `generic_scan()`
-itself" below). Left unfixed here deliberately: porting an equivalent
-masking pass to Babel's AST is real, separate work, and this is currently
-the only rule in `rules_js.js` whose trigger text is a type name at all
-likely to show up in a log/comment string — none of the 10 Anthropic JS
-rules have shown this in testing so far. Tracked as open, not silently
-assumed fine.
+itself" below). Originally left unfixed and tracked as an open gap — see
+the next update, same day, for why that changed almost immediately.
 
 Also closed a second, older gap while here: `scan-js: "true"` (the
 composite action's JS/TS opt-in — Node setup, `npm install`,
@@ -518,6 +515,69 @@ run before, only manually/locally. `self-check.yml` now has a job that
 runs it for real against `js_scanner/example_project/` and checks the new
 OpenAI rule fires by id — the first CI-covered proof the whole `scan-js`
 path works end-to-end, not just the rule content.
+
+**Update (2026-09-11, later the same day): the string-literal gap above
+closed for JS/TS too — and porting the fix directly uncovered a real,
+separate bug in the process.** `ast_scan.js` now has its own masking pass
+(`buildStructuralSnippet` / `collectStringLiteralSpans`), same idea as
+Python's `_mask_string_literals`: blank every string/template literal's
+contents before regex-matching, so a rule can't match text that only
+lives inside an unrelated string. Deliberately *not* implemented via
+`@babel/traverse` (even though it's already a dependency) — a plain
+recursive walk over own-enumerable-properties needs no scope tracking, so
+it can't hit the same scope-crawling crash `@babel/traverse` already
+caused once on valid-but-unusual TS (bug #1 above). Also deliberately
+*not* using `@babel/generator` to re-emit code from the masked tree — the
+existing `code.slice(node.start, node.end)` snippet is spliced directly at
+each string/template literal's own start/end offsets instead, avoiding a
+new dependency entirely.
+
+**The real bug: this was not a straight port of Python's exemption set,
+and assuming it was one would have shipped a silent regression.** The
+first version carried over only Python's 2 non-hand-coded exemptions
+(`memory-list-managed-agents-header-behavior-change`,
+`computer-use-toolset-new-shape`). Running it against a real-usage fixture
+immediately broke a true positive: `model-deprecated-sonnet4-opus4`
+stopped firing on `bot.ts:33`'s real deprecated-model call. Root cause is
+architectural, not a copy-paste slip — on the Python side, every
+model-name/config-value rule (`sdk-v1-sampling-params-removed` and
+friends) is hand-coded in `scan_source()` via `find_calls()`/`get_kwargs()`
+— real AST field access to the actual keyword argument value, never
+regex-on-text, so masking is irrelevant to it. `rules_js.js` has no
+equivalent hand-coded path for any of its model-name/config rules — all
+of them go through the same generic regex-on-snippet loop Python's
+`generic_scan()` uses, so several rules whose real signal is a plain
+string value (a model name literal, a `"fast"`/`"xhigh"`/`"disabled"`
+config string, a URL path string) needed exemptions with no Python-side
+counterpart to copy from at all.
+
+Re-derived the exemption set empirically instead of guessing further: a
+synthetic real-usage snippet per candidate rule, run through the scanner
+before and after masking. Confirmed 5 more rules needed exemption
+(`model-retired-opus-4-1`, `model-deprecated-sonnet4-opus4`,
+`fast-mode-removed-opus-4-7`, `opus5-effort-xhigh-thinking-disabled`,
+`experimental-endpoint-retiring`) — `GENERIC_RULES_MATCH_INSIDE_STRINGS`
+in `ast_scan.js` is 7 entries now, not 2. Confirmed the remaining 3
+generic-path rules (`manual-thinking-budget`, `beta-files-skills-sdk-shape-change`,
+`openai-v2-tool-call-output-type-widened`) are genuinely code-shape and
+safe to mask — the last of those is the exact rule this whole fix was
+built to protect, and it still correctly fires on `openai_bot.ts`'s real
+import while no longer false-positiving on the log-string case.
+
+Promoted the throwaway fixtures into permanent regression coverage:
+`js_scanner/example_project/more_rules_bot.ts` (real usage for all 4
+newly-discovered-vulnerable rules, plus the 2 previously-untested exempted
+rules — closing a real, separate gap: 6 of `rules_js.js`'s 11 rules had
+never been exercised by any TS fixture in this repo before today) and
+`js_scanner/example_project/string_literal_audit_fixture.ts` (the 3
+code-shape rules' trigger text planted purely inside unrelated
+`console.log` strings, must produce 0 findings). Net result:
+`js_scanner/example_project/` now produces exactly 11 findings, one per
+`RULES_JS` rule, for the first time ever covering the entire JS/TS rule
+set against real-usage fixtures — and `self-check.yml`'s
+`expect-all-js-rules-fire-on-js-fixtures` job checks every one of the 11
+rule_ids by name, so a silent regression in any single rule can't hide
+behind another rule still failing the severity gate.
 
 ## Multi-provider support (OpenAI)
 

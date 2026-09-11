@@ -29,16 +29,17 @@ from pathlib import Path
 
 from rules import RULES as _RULES_ANTHROPIC
 from rules_openai import RULES_OPENAI as _RULES_OPENAI
+from rules_gemini import RULES_GEMINI as _RULES_GEMINI
 
 # A rule with no "provider" key is an Anthropic rule — every entry in
 # rules.py predates this field, and it would be needless busywork (and
 # needless risk to code that's already been validated against 6 real
 # repos) to go back and add "provider": "anthropic" to all 18 of them by
-# hand. New provider rule files (rules_openai.py and whatever comes after
-# it) are required to set it explicitly instead.
+# hand. New provider rule files (rules_openai.py, rules_gemini.py, and
+# whatever comes after them) are required to set it explicitly instead.
 for _rule in _RULES_ANTHROPIC:
     _rule.setdefault("provider", "anthropic")
-RULES = _RULES_ANTHROPIC + _RULES_OPENAI
+RULES = _RULES_ANTHROPIC + _RULES_OPENAI + _RULES_GEMINI
 
 SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__", "dist", "build"}
 

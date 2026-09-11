@@ -168,19 +168,19 @@ const RULES_JS = [
   // "no invented rule for something this scanner structurally can't see"
   // choice as the raw-HTTP blind spot documented in the README.
   //
-  // Known gap, CONFIRMED not just theorized: unlike ast_scan.py's
-  // generic_scan(), this JS/TS scanner has no string-literal-masking pass
-  // yet (see README's "Closing the string-literal gap in generic_scan()
-  // itself" — that fix was Python-only). Built a throwaway fixture with
-  // the type name only inside a console.log string, never a real import
-  // or type reference — it false-positives, exactly the same bug class
-  // already fixed on the Python side. Left unfixed here deliberately (not
-  // an oversight): porting _mask_string_literals-equivalent masking to
-  // Babel's AST is real, separate work, and this is currently the only
-  // rule in RULES_JS whose trigger text (a type name) is remotely likely
-  // to show up in a log/comment string — none of the Anthropic JS rules
-  // above have shown this in testing so far. See README's "JS/TS support"
-  // section for the tracking note.
+  // Update (2026-09-11): the paragraph that used to be here said this
+  // scanner had no string-literal-masking pass. That's no longer true —
+  // see GENERIC_RULES_MATCH_INSIDE_STRINGS and buildStructuralSnippet() in
+  // ast_scan.js, added the same day to close exactly this class of false
+  // positive (found live in string_literal_audit_fixture.ts). This rule
+  // specifically doesn't need that exemption, though: its trigger text
+  // (ResponseFunctionToolCallOutputItem / ResponseCustomToolCallOutput) is
+  // always a real identifier — a type import specifier or a type
+  // annotation — never a string literal's *value*, so the default
+  // (masked) structural snippet still contains it untouched. Confirmed via
+  // js_scanner/example_project/string_literal_audit_fixture.ts, which
+  // plants these two names only inside a console.log string and expects
+  // (and gets) zero findings.
   {
     id: "openai-v2-tool-call-output-type-widened",
     pattern: /ResponseFunctionToolCallOutputItem|ResponseCustomToolCallOutput/,
@@ -190,6 +190,59 @@ const RULES_JS = [
     title: "SDK v6.0.0 widens tool-call output's type from string to string | array",
     detail: "ResponseFunctionToolCallOutputItem.output and ResponseCustomToolCallOutput.output changed from always being a plain string to string | Array<ResponseInputText | ResponseInputImage | ResponseInputFile>. Code that assumes .output is always a string (e.g. passing it straight into a string-only function, or indexing into it like a string) can break or misbehave silently once a caller starts sending back structured content.",
     fix: "Check the type of .output at runtime (typeof === 'string' vs. Array.isArray) before treating it as plain text.",
+  },
+
+  // --- Gemini (added 2026-09-11) ---
+  //
+  // See rules_gemini.py for the full research writeup (same sources: the
+  // archived google-gemini/deprecated-generative-ai-python and its JS
+  // sibling deprecated-generative-ai-js, both "EOL 2025-11-30"; Google's
+  // own https://ai.google.dev/gemini-api/docs/migrate for the old-vs-new
+  // code shapes). Same id as the Python rule — API/package-deprecation
+  // level, not SDK-implementation level, and both languages' old SDKs were
+  // deprecated together in the same announcement.
+  //
+  // Unlike the Python version, this one DOES need the string-literal
+  // exemption below, and for a structurally different reason than any of
+  // the 7 Anthropic-rule entries in GENERIC_RULES_MATCH_INSIDE_STRINGS: a
+  // Python "import google.generativeai" is bare identifier syntax with no
+  // string in it at all, so masking never touches it — but an ES import's
+  // module specifier ("@google/generative-ai") IS a StringLiteral node,
+  // and collectStringLiteralSpans() blanks every StringLiteral it finds,
+  // import specifiers included. Without the exemption, this rule could
+  // never fire on a real `import ... from "@google/generative-ai"` at all.
+  //
+  // Checked this is safe, not just reasoned about — and a first version
+  // WASN'T: it also matched a bare `require("@google/generative-ai")`
+  // anywhere in a node's text, on the theory that match_text is always one
+  // whole candidate node's own snippet (never file-wide), so only a real
+  // require() call could produce that exact substring. Wrong, caught by a
+  // deliberately adversarial fixture (js_scanner/example_project/
+  // string_literal_audit_fixture.ts): `console.log(\`...run:
+  // require("@google/generative-ai")...\`)` is itself one CallExpression
+  // node (console.log(...)), and its raw (unmasked, per this rule's
+  // exemption) snippet contains that substring inside the template
+  // literal's *content* — a real false positive, live-confirmed, not
+  // hypothetical. `^import` doesn't have this problem (a CallExpression's
+  // own unparsed text can never itself begin with the literal word
+  // "import" — that's only possible for a real ImportDeclaration, or a
+  // dynamic import() expression, which this pattern doesn't currently
+  // catch either — a real, stated, separate gap, not the one being fixed
+  // here). Fix: dropped the require() alternative entirely rather than try
+  // to anchor it — same "narrow with a real structural precondition, not a
+  // wider or cleverer regex" call made for openai-httpx-to-httpx2 and
+  // python-sdk-v1-httpx-to-httpx2. Real-world cost is low: every fixture
+  // and every real hit found for this rule so far (litellm's palm.py, on
+  // the Python side) used ES `import`/`from`, not CommonJS `require()`.
+  {
+    id: "gemini-legacy-sdk-deprecated",
+    pattern: /^import\b[\s\S]*from\s+["']@google\/generative-ai["']|^import\s+["']@google\/generative-ai["']/,
+    appliesIfModel: null,
+    severity: "HIGH",
+    deadline: "already active (repo archived, EOL 2025-11-30)",
+    title: "@google/generative-ai is archived — migrate to @google/genai",
+    detail: "The @google/generative-ai package (GoogleGenerativeAI class, genAI.getGenerativeModel({...}) calling style) is the pre-Gemini-2.0 SDK. Its README says support ended permanently on 2025-11-30 — critical-bug-fixes-only before that, nothing at all after. It still works today, but gets no further updates, and every current Gemini API doc/example now shows the new SDK instead.",
+    fix: "Replace `import { GoogleGenerativeAI } from \"@google/generative-ai\"; const genAI = new GoogleGenerativeAI(key); const model = genAI.getGenerativeModel({ model: ... }); const result = await model.generateContent(prompt);` with the unified SDK: `import { GoogleGenAI } from \"@google/genai\"; const ai = new GoogleGenAI({ apiKey: key }); const response = await ai.models.generateContent({ model: ..., contents: prompt });`. Full guide: https://ai.google.dev/gemini-api/docs/migrate",
   },
 ];
 

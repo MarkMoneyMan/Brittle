@@ -1,11 +1,11 @@
 # claude-api-guard
 
-A GitHub Action that scans your codebase for usage of the Claude/Anthropic
-and OpenAI APIs that's broken, or about to break, because of a known, dated
-API change — and auto-fixes the mechanical ones. It keeps its own rule set
-current by reading each provider's official release notes on a schedule and
-extracting new breaking changes with an LLM, so it doesn't go stale the way
-a hand-maintained list would.
+A GitHub Action that scans your codebase for usage of the Claude/Anthropic,
+OpenAI, and Gemini APIs that's broken, or about to break, because of a
+known, dated API change — and auto-fixes the mechanical ones. It keeps its
+own rule set current by reading each provider's official release notes on a
+schedule and extracting new breaking changes with an LLM, so it doesn't go
+stale the way a hand-maintained list would.
 
 ## Why this exists
 
@@ -22,7 +22,11 @@ correct; see the engineering log below for the actual false positives found
 and fixed), and its rule set updates itself from Anthropic's live release
 notes. OpenAI support followed the same bar: hand-extracted from OpenAI's
 own changelog and migration guides, then fully triaged against a large real
-codebase (litellm) until every finding checked out. The plan from here is
+codebase (litellm) until every finding checked out. Gemini is the third
+provider (see "Multi-provider support (Gemini)" below) — deliberately
+narrower on day one than the other two (1 rule, not 4-18), because that's
+what actually survived reading the real changelog and testing against real
+code, not a lower bar applied to a newer provider. The plan from here is
 to keep expanding provider coverage outward from that same foundation —
 this is meant to grow into a broader "breaking-change guard for every API
 your project depends on" tool, not stay a single-provider niche script. The
@@ -157,6 +161,13 @@ an `ANTHROPIC_API_KEY` to run for real.
   closed now, same day — see "JS/TS support" for what that fix found.
   See "JS/TS support" and "Multi-provider support" below for exactly
   what's been tested and what hasn't.
+- Gemini support (`rules_gemini.py`, added 2026-09-11) is deliberately just
+  1 rule so far — the legacy `google-generativeai` SDK deprecation, both
+  Python and JS/TS, tested for real against litellm. The much larger set of
+  real 2026 breaking changes in Gemini's Interactions API was read and
+  deliberately left unshipped (narrower, less-adopted API surface, not yet
+  tested against real code) rather than guessed at — see "Multi-provider
+  support (Gemini)" for exactly what was reviewed and why.
 
 ## Validated against
 
@@ -716,6 +727,133 @@ real end-to-end test whenever openai-python next ships a version with an
 actual `⚠ BREAKING CHANGES` section and the Monday schedule (or a manual
 run) picks it up — same "this part waits for something real to happen"
 honesty already applied to Anthropic's own first automated run.
+
+## Multi-provider support (Gemini)
+
+Third provider, after Anthropic and OpenAI, chosen deliberately rather than
+picked arbitrarily: researched Google Gemini against Mistral first (adoption,
+SDK maturity, and — most relevant to this project specifically — whether
+breaking changes are tracked in a structured, mechanically-parseable way or
+require prose-inference). Gemini's `google-genai` SDK won on all three: more
+GitHub stars than Mistral's `client-python` (3.9k vs 767), a real recent
+major-version jump (v1→v2, 2026-05-07) with explicit `### ⚠ BREAKING
+CHANGES` markers per release the same way OpenAI's `CHANGELOG.md` has them
+(Mistral's breaking changes live in a separate, less-frequently-updated
+`MIGRATION.md` instead), and its own live SDK-deprecation story (see below).
+
+**Read all 13 real `### ⚠ BREAKING CHANGES`-marked sections in
+`python-genai`'s actual `CHANGELOG.md` by hand before writing a single rule**
+(v0.3.0, 2024-12-17, through v2.9.0, 2026-06-19) — same "research first,
+write rules from what's actually there" discipline `rules_openai.py` was
+built with, not a repeat of scan.py's original mistake of guessing at what
+might be a breaking change. Honest finding, stated plainly rather than
+smoothed over: almost none of it was worth shipping as a rule *yet*.
+Roughly a dozen of the 13 are either over a year old (narrow 0.x/early-1.x
+method renames — `generate_image` → `generate_images`,
+`Part.from_video_metadata` removed, etc. — unlikely to still be sitting in
+actively-maintained code) or scoped to the Interactions API specifically,
+which v2.0.0's own changelog entry says outright: *"the breaking changes are
+only in interactions. `GenerateContent` usage in unaffected."* That's the
+more-2026, more-recent material, but it's a narrower, less-adopted API
+surface than the mainline `client.models.generate_content(...)` call path
+most real Gemini code actually uses — and unlike the rule that did ship
+(below), nothing about the Interactions API has been checked against a real
+external codebase. Rather than guess at regex precision for a part of the
+SDK this project hasn't tested, that's deliberately left for `sync_rules.py`
+to pick up and route through a human-reviewed PR later (see "Rule sync"),
+not hand-shipped speculatively. Also deliberately **not** added: an
+httpx-to-httpx2 rule matching Anthropic's and OpenAI's — checked, and
+v2.18.0's "Support injecting httpx2 client" is a plain *Feature*, not a
+breaking change; httpx (v1) still works today. Nothing to flag until Google
+actually forces that migration the way OpenAI did.
+
+**The one rule that did ship comes from a better signal than any changelog
+line: `google-generativeai`, the SDK basically every pre-2025 Gemini
+tutorial was written against, is a fully archived repository.** Both its
+README and its JS sibling's (`deprecated-generative-ai-js`) say, word for
+word, *"All support for this repository ended permanently on November 30,
+2025."* That's a stronger, more unambiguous deprecation signal than a
+changelog entry, and exactly the kind of thing that survives in old,
+unmaintained code long after — same category as `rules.py`'s Legacy Text
+Completions rule and `rules_openai.py`'s pre-v1 module-level-calls rule.
+Old vs. new call shape (Python, confirmed against Google's own
+[migration guide](https://ai.google.dev/gemini-api/docs/migrate), not
+guessed): `import google.generativeai as genai; genai.configure(api_key=...);
+genai.GenerativeModel(...)` → `from google import genai; genai.Client(...);
+client.models.generate_content(...)`.
+
+**Tested for real against litellm, not assumed correct — found both a true
+positive and the exact false-positive trap this project has learned to
+expect by now:**
+
+1. True positive: litellm's own `llms/deprecated_providers/palm.py` — its
+   own legacy PaLM/Gemini integration, still in the tree — has a real
+   `import google.generativeai as palm` + `palm.configure(...)` +
+   `palm.generate_text(...)`. Confirms the pattern isn't hypothetical, and
+   confirms it needs to be alias-independent (`palm`, not `genai` — keying
+   on the import statement itself, not an assumed alias name, is what
+   catches this).
+2. The exact same string-literal trap as bug #4 in the OpenAI section
+   above, found in the same repo: `prompt_templates/factory.py:3268` has
+   `"google.generativeai"` appearing only inside an exception message
+   string, never a real import. Closed **by construction, not by an added
+   exemption**: a Python import statement's module path is bare identifier
+   syntax, never a string literal, so `generic_scan()`'s string-masking
+   never even needs to run on it — confirmed 0 findings there.
+
+**The JS/TS port needed the opposite, deliberate handling, and a real bug of
+its own, caught by testing before shipping rather than after:** an ES import
+specifier (`"@google/generative-ai"`) *is* a `StringLiteral` node, so
+`buildStructuralSnippet()`'s masking blanks it by default — without adding
+`gemini-legacy-sdk-deprecated` to `GENERIC_RULES_MATCH_INSIDE_STRINGS`, the
+rule could never fire on a real import at all. But a first version of that
+exemption also matched a bare `require("@google/generative-ai")` *substring
+anywhere in a node's raw text*, on the assumption that only a real
+`require()` call could produce it — wrong, caught by a deliberately
+adversarial fixture (`console.log(\`...run: require("@google/generative-ai")
+...\`)`, a real live false positive, not hypothetical: one `CallExpression`
+node whose own text legitimately contains that substring inside a template
+literal's *content*). Fixed the same way every other too-broad pattern in
+this project has been fixed: not a cleverer regex, but dropping the
+`require()` alternative entirely and keeping only the `^import`-anchored
+forms — a `CallExpression`'s own unparsed text can never itself begin with
+the literal word "import", so a false positive would need some *other*
+node whose text starts with real import syntax naming this exact package,
+which in practice means an actual import of it. Real-world cost is low:
+every real hit found so far (litellm's `palm.py`) and every fixture in this
+project uses ES `import`/`from`, never CommonJS `require()`. Permanent
+regression fixture for this specific bug:
+`js_scanner/example_project/string_literal_audit_fixture.ts`'s 4th case.
+
+**Wired into everything else the same day, not left as a standalone rule
+file:** `ast_scan.py` merges `rules_gemini.py` into `RULES` (a rule with no
+`"provider"` key still defaults to `"anthropic"`, unaffected);
+`pyproject.toml`'s `py-modules` got `rules_gemini` added *in the same
+commit* it was created, specifically to not repeat the exact bug
+`rules_openai.py` hit here (`ModuleNotFoundError` on the installed
+package — see the engineering log); `sync_rules.py` has a `gemini` entry in
+`PROVIDERS` with its own section parser (`parse_dated_sections_gemini`,
+case-**in**sensitive on the "breaking change" marker — unlike OpenAI's
+parser, checked and confirmed necessary: the real changelog uses at least 4
+different marker spellings across its history, including a plain,
+lowercase-ish `### Breaking changes` with no `⚠` that a case-sensitive
+check would miss); `update-rules.yml` runs it as a third step and checks all
+three rules files still parse; `self-check.yml` has a dedicated
+`expect-gemini-rule-fires-on-gemini-fixture` job (Python) and the JS job now
+expects 12 rule_ids instead of 11, both checked by name. `pipeline_runs/
+last_synced.json`'s `"gemini"` entry is seeded to 2026-09-11 (the date of
+this hand-seeding pass) specifically so a real sync run only processes
+sections *after* this review, not the 13 already read and deliberately left
+out above — same seeding logic already used for `openai`'s entry.
+
+Not yet done, stated plainly rather than implied: the Interactions-API
+breaking changes noted above haven't been turned into rules or tested
+against any real codebase using that API surface (may not even exist in
+meaningful volume yet, given how new it is); Gemini's rule sync, like
+OpenAI's, hasn't had a real end-to-end run against an actual *new* breaking
+change yet — it'll get one whenever `python-genai` next ships a version with
+a genuine breaking-change section after 2026-09-11 and the Monday schedule
+(or a manual run) picks it up.
 
 ## Closing the string-literal gap in `generic_scan()` itself
 

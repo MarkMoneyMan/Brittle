@@ -1,18 +1,20 @@
 name: self-check
 
-# Dogfoods action.yml against this repo itself, on every push/PR. Six
+# Dogfoods action.yml against this repo itself, on every push/PR. Seven
 # jobs, all really assertions about the tool's own correctness (not about
 # this repo's code health): one path is known to contain real Anthropic-
 # rule findings and must fail the severity gate, one specifically checks
 # the OpenAI (Python) rules by name (not just "some rule fired" — see that
-# job's comment for why), one path is known to be clean and must pass the
-# gate, one installs the pip package (pyproject.toml) fresh and checks the
-# installed console scripts behave the same as running the scripts
-# directly, one is a permanent regression test for the string-literal
-# false-positive gap closed on 2026-09-11 (see README's "Closing the
-# string-literal gap in generic_scan() itself"), and one checks every
-# RULES_JS rule by name (and, since 2026-09-11, is also the regression
-# test for ast_scan.js's own string-literal masking fix) AND is the first
+# job's comment for why), one does the same for the Gemini (Python) rule,
+# one path is known to be clean and must pass the gate, one installs the
+# pip package (pyproject.toml) fresh and checks the installed console
+# scripts behave the same as running the scripts directly, one is a
+# permanent regression test for the string-literal false-positive gap
+# closed on 2026-09-11 (see README's "Closing the string-literal gap in
+# generic_scan() itself"), and one checks every RULES_JS rule by name (and,
+# since 2026-09-11, is also the regression test for ast_scan.js's own
+# string-literal masking fix, and the pattern-anchoring fix that shipped
+# alongside gemini-legacy-sdk-deprecated the same day) AND is the first
 # CI-covered proof scan-js: "true" works at all. If any assumption stops
 # holding, that's a regression to fix, not a real finding to triage.
 
@@ -66,6 +68,34 @@ jobs:
             fi
           done
           echo "OK: gate correctly failed, and both openai-httpx-to-httpx2 and openai-v1-legacy-module-level-calls-removed fired as expected."
+
+  expect-gemini-rule-fires-on-gemini-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run claude-api-guard against example_project/gemini_bot.py (known Gemini-rule finding)
+        id: scan
+        continue-on-error: true
+        uses: ./
+        with:
+          path: example_project/gemini_bot.py
+          fail-on: HIGH
+      - name: Assert the severity gate failed AND the Gemini rule actually fired
+        run: |
+          if [ "${{ steps.scan.outcome }}" != "failure" ]; then
+            echo "::error::Expected the HIGH-severity gate to fail against example_project/gemini_bot.py (it has a known HIGH finding), but the step outcome was '${{ steps.scan.outcome }}'."
+            exit 1
+          fi
+          if [ "${{ steps.scan.outputs.findings-count }}" != "1" ]; then
+            echo "::error::Expected exactly 1 finding on example_project/gemini_bot.py (the legacy-SDK import; the migrated call must stay clean), got ${{ steps.scan.outputs.findings-count }}."
+            exit 1
+          fi
+          json_path="${{ steps.scan.outputs.findings-json }}"
+          if ! grep -q "\"gemini-legacy-sdk-deprecated\"" "$json_path"; then
+            echo "::error::Expected rule_id 'gemini-legacy-sdk-deprecated' in $json_path but it wasn't there — check rules_gemini.py."
+            exit 1
+          fi
+          echo "OK: gate correctly failed, exactly 1 finding, and gemini-legacy-sdk-deprecated fired as expected."
 
   expect-clean-on-known-clean-fixture:
     runs-on: ubuntu-latest
@@ -144,14 +174,14 @@ jobs:
     # path — Node setup, npm install, ast_scan.js — was previously only
     # ever exercised manually/locally; see README's "JS/TS support"). And,
     # since 2026-09-11, the permanent regression test for the string-
-    # literal masking fix in ast_scan.js: js_scanner/example_project/ now
-    # has real-usage coverage for all 11 RULES_JS rules (4 of them had
-    # never been exercised by any TS fixture before that work), plus
-    # string_literal_audit_fixture.ts, which plants the 3 genuinely
-    # code-shape rules' trigger text purely in unrelated console.log
-    # strings and must contribute exactly 0 findings — expects exactly 11
-    # total findings, one per rule, checked by id so a silently-broken
-    # rule can't hide behind some other rule still failing the gate.
+    # literal masking fix in ast_scan.js (plus, added the same day, the
+    # require()-anchoring fix for gemini-legacy-sdk-deprecated):
+    # js_scanner/example_project/ now has real-usage coverage for all 12
+    # RULES_JS rules, plus string_literal_audit_fixture.ts, which plants
+    # 4 rules' trigger text purely in unrelated console.log strings and
+    # must contribute exactly 0 findings — expects exactly 12 total
+    # findings, one per rule, checked by id so a silently-broken rule
+    # can't hide behind some other rule still failing the gate.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -163,24 +193,24 @@ jobs:
           path: js_scanner/example_project
           scan-js: "true"
           fail-on: HIGH
-      - name: Assert the severity gate failed AND exactly the 11 expected rule_ids fired (no more, no fewer)
+      - name: Assert the severity gate failed AND exactly the 12 expected rule_ids fired (no more, no fewer)
         run: |
           if [ "${{ steps.scan.outcome }}" != "failure" ]; then
             echo "::error::Expected the HIGH-severity gate to fail against js_scanner/example_project/ (bot.ts has known HIGH findings), but the step outcome was '${{ steps.scan.outcome }}'."
             exit 1
           fi
-          if [ "${{ steps.scan.outputs.findings-count }}" != "11" ]; then
-            echo "::error::Expected exactly 11 findings (one per RULES_JS rule) on js_scanner/example_project/, got ${{ steps.scan.outputs.findings-count }}. Either a rule stopped firing on its real-usage fixture, or string_literal_audit_fixture.ts started producing false positives again — see this job's comment."
+          if [ "${{ steps.scan.outputs.findings-count }}" != "12" ]; then
+            echo "::error::Expected exactly 12 findings (one per RULES_JS rule) on js_scanner/example_project/, got ${{ steps.scan.outputs.findings-count }}. Either a rule stopped firing on its real-usage fixture, or string_literal_audit_fixture.ts started producing false positives again — see this job's comment."
             exit 1
           fi
           json_path="${{ steps.scan.outputs.findings-json }}"
-          for rule_id in model-retired-opus-4-1 model-deprecated-sonnet4-opus4 fast-mode-removed-opus-4-7 opus5-effort-xhigh-thinking-disabled manual-thinking-budget assistant-prefill-removed experimental-endpoint-retiring beta-files-skills-sdk-shape-change memory-list-managed-agents-header-behavior-change computer-use-toolset-new-shape openai-v2-tool-call-output-type-widened; do
+          for rule_id in model-retired-opus-4-1 model-deprecated-sonnet4-opus4 fast-mode-removed-opus-4-7 opus5-effort-xhigh-thinking-disabled manual-thinking-budget assistant-prefill-removed experimental-endpoint-retiring beta-files-skills-sdk-shape-change memory-list-managed-agents-header-behavior-change computer-use-toolset-new-shape openai-v2-tool-call-output-type-widened gemini-legacy-sdk-deprecated; do
             if ! grep -q "\"$rule_id\"" "$json_path"; then
               echo "::error::Expected rule_id '$rule_id' in $json_path but it wasn't there — check rules_js.js and its real-usage fixture in js_scanner/example_project/."
               exit 1
             fi
           done
-          echo "OK: gate correctly failed, and all 11 RULES_JS rules fired exactly once each, by name."
+          echo "OK: gate correctly failed, and all 12 RULES_JS rules fired exactly once each, by name."
 
   package-installs-and-runs:
     runs-on: ubuntu-latest
@@ -195,7 +225,7 @@ jobs:
         id: scan
         continue-on-error: true
         run: claude-api-guard-scan example_project/ --json installed_scan_findings.json
-      - name: Assert it found the known HIGH findings from BOTH providers (nonzero exit, not a crash)
+      - name: Assert it found the known HIGH findings from ALL THREE providers (nonzero exit, not a crash)
         run: |
           # Real bug, found on a real Actions run (not hypothetical): this
           # assertion used to check only `outcome == "failure"`, and a
@@ -204,9 +234,12 @@ jobs:
           # so that crash silently passed this exact check while genuinely
           # meaning something completely different from "found the known
           # findings." Now checks that a real findings-json file exists
-          # and contains specific rule_ids from BOTH rules files — proof
-          # the installed package's full merged RULES list actually
-          # loaded, not just proof *some* command somewhere exited 1.
+          # and contains specific rule_ids from ALL THREE rules files —
+          # proof the installed package's full merged RULES list actually
+          # loaded, not just proof *some* command somewhere exited 1. This
+          # exact check is also why rules_gemini.py was added to
+          # pyproject.toml's py-modules the same commit it was created,
+          # instead of finding out the hard way like rules_openai.py did.
           if [ "${{ steps.scan.outcome }}" != "failure" ]; then
             echo "::error::Expected the installed claude-api-guard-scan to exit non-zero against example_project/ (it has known findings), but the step outcome was '${{ steps.scan.outcome }}'."
             exit 1
@@ -215,13 +248,13 @@ jobs:
             echo "::error::Expected installed_scan_findings.json to exist and be non-empty — the scan step exited non-zero, but if that's a crash (e.g. an import error) rather than real findings, no JSON file gets written at all."
             exit 1
           fi
-          for rule_id in sdk-v1-sampling-params-removed openai-httpx-to-httpx2; do
+          for rule_id in sdk-v1-sampling-params-removed openai-httpx-to-httpx2 gemini-legacy-sdk-deprecated; do
             if ! grep -q "\"$rule_id\"" installed_scan_findings.json; then
-              echo "::error::Expected rule_id '$rule_id' in installed_scan_findings.json but it wasn't there — the installed package's merged RULES list (rules.py + rules_openai.py) may not have loaded correctly."
+              echo "::error::Expected rule_id '$rule_id' in installed_scan_findings.json but it wasn't there — the installed package's merged RULES list (rules.py + rules_openai.py + rules_gemini.py) may not have loaded correctly."
               exit 1
             fi
           done
-          echo "OK: installed console script found and reported the known findings from both providers."
+          echo "OK: installed console script found and reported the known findings from all three providers."
       - name: Assert the installed claude-api-guard-autofix produces a working patch
         run: |
           cp example_project/autofix_test.py /tmp/autofix_smoke_test.py

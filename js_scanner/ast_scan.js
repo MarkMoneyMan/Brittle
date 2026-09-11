@@ -186,6 +186,7 @@ const GENERIC_RULES_MATCH_INSIDE_STRINGS = new Set([
   "experimental-endpoint-retiring", // the retired path is a URL string literal
   "memory-list-managed-agents-header-behavior-change", // header value is a string literal
   "computer-use-toolset-new-shape", // tool "type" value is a string literal
+  "gemini-legacy-sdk-deprecated", // (2026-09-11) an ES import specifier IS a StringLiteral node — see rules_js.js's own note on this one, it's a different reason than the 7 above (an import path, not a config/model value)
 ]);
 // Confirmed the OTHER 4 rules are genuinely code-shape, not string-value,
 // so masking is safe (and correctly closes their false-positive risk)

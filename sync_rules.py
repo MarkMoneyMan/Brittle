@@ -65,6 +65,17 @@ OPENAI_VERSION_HEADER_RE = re.compile(
     r"^##\s+\[?([\d.]+)\]?(?:\([^)]*\))?\s*\((\d{4}-\d{2}-\d{2})\)\s*$", re.MULTILINE
 )
 
+# "## [2.23.0](.../compare/v2.22.0...v2.23.0) (2026-09-10)" — same
+# semantic-release shape as OpenAI's, confirmed against the real file's
+# full ~113-version history. One difference found checking that coverage:
+# the version segment can carry a "-rcN" pre-release suffix (e.g.
+# "2.9.0-rc1") that OPENAI_VERSION_HEADER_RE's [\d.]+ doesn't allow for —
+# harmless to miss (2 headers out of 115 in the real file, both immediately
+# superseded by the real release moments later) but cheap to just support.
+GEMINI_VERSION_HEADER_RE = re.compile(
+    r"^##\s+\[?([\d.]+(?:-rc\d+)?)\]?(?:\([^)]*\))?\s*\((\d{4}-\d{2}-\d{2})\)\s*$", re.MULTILINE
+)
+
 
 def fetch_url(url):
     """Plain GET, no auth — every source here is a public page."""
@@ -131,6 +142,45 @@ def parse_dated_sections_openai(markdown_text):
     return sections
 
 
+def parse_dated_sections_gemini(markdown_text):
+    """Split python-genai's CHANGELOG.md into (date, label, section_text)
+    tuples, same "only the breaking ones" filter as
+    parse_dated_sections_openai — but case-INsensitive on the marker,
+    unlike that one. Checked against the real file: it uses at least 4
+    different spellings of the same marker across its history —
+    "### ⚠ BREAKING CHANGES", "### ⚠ BREAKING CHANGES - Interactions Only",
+    "### ⚠ BREAKING CHANGES TO EXPERIMENTAL FEATURES", and (older entries)
+    plain "### Breaking changes" / "### BREAKING CHANGES" with no ⚠ at all.
+    A case-sensitive "BREAKING CHANGE" substring check (OpenAI's exact
+    approach) misses that last, lowercase-ish form; `.lower()` before the
+    substring check catches all 4 without needing to enumerate them.
+
+    Deliberately still sends every one of these to extract() on a real
+    sync run, INCLUDING the narrower Interactions-API-only ones — unlike
+    the initial hand-seeded rules_gemini.py, which left those out (see that
+    file's docstring for why: untested regex risk, not "not a real breaking
+    change"). last_synced_date is seeded to the date of that hand-seeding
+    pass specifically so a real sync run only ever processes sections
+    *after* it — it does not retroactively re-litigate the ones already
+    reviewed by hand.
+    """
+    headers = list(GEMINI_VERSION_HEADER_RE.finditer(markdown_text))
+    sections = []
+    for i, m in enumerate(headers):
+        version, date_str = m.group(1), m.group(2)
+        try:
+            date = datetime.date.fromisoformat(date_str)
+        except ValueError:
+            continue
+        start = m.start()
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(markdown_text)
+        section_text = markdown_text[start:end].rstrip()
+        if "breaking change" not in section_text.lower():
+            continue
+        sections.append((date, f"v{version} ({date_str})", section_text))
+    return sections
+
+
 PROVIDERS = {
     "anthropic": {
         "changelog_url": "https://platform.claude.com/docs/en/release-notes/overview.md",
@@ -147,6 +197,14 @@ PROVIDERS = {
         "rules_var": "RULES_OPENAI",
         "auto_var_prefix": "RULES_OPENAI_AUTO_",
         "provider_label": "OpenAI's API",
+    },
+    "gemini": {
+        "changelog_url": "https://raw.githubusercontent.com/googleapis/python-genai/main/CHANGELOG.md",
+        "parse_sections": parse_dated_sections_gemini,
+        "rules_path": REPO_ROOT / "rules_gemini.py",
+        "rules_var": "RULES_GEMINI",
+        "auto_var_prefix": "RULES_GEMINI_AUTO_",
+        "provider_label": "Google's Gemini API",
     },
 }
 

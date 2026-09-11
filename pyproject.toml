@@ -44,4 +44,4 @@ claude-api-guard-autofix = "autofix:main"
 # the job that broke on the real Actions run, 3 times in a row, before
 # this got noticed and fixed.
 [tool.setuptools]
-py-modules = ["rules", "rules_openai", "ast_scan", "autofix"]
+py-modules = ["rules", "rules_openai", "rules_gemini", "ast_scan", "autofix"]

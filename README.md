@@ -143,14 +143,16 @@ an `ANTHROPIC_API_KEY` to run for real.
 - Rule *sync* runs on a schedule now (`sync_rules.py` +
   `update-rules.yml`), but every extracted rule still goes through a PR a
   human reviews before it's live — deliberately not fully unattended.
-- OpenAI support (`rules_openai.py`) is still small (4 rules) and
-  Python-only. IS wired into rule sync and CI self-check now (this bullet
-  was wrong on that point until 2026-09-11 — "Multi-provider support"
-  below documented the fix correctly but this summary line never got
-  updated to match, a real doc-drift bug caught auditing this section, not
-  a new claim); the one genuinely open gap is the JS/TS scanner, which
-  still only knows the Anthropic rule set. See "Multi-provider support"
-  below for exactly what's been tested and what hasn't.
+- OpenAI support (`rules_openai.py`, 4 rules) is Python-only, wired into
+  rule sync and CI self-check (this bullet used to wrongly say otherwise —
+  see the doc-drift note in "Multi-provider support" below). The JS/TS
+  scanner now knows exactly 1 OpenAI rule (`openai-v2-tool-call-output-type-widened`,
+  added 2026-09-11), not the other 3 — those are Python-implementation-level,
+  not API-level, same reasoning that keeps several Python-only Anthropic
+  rules out of `rules_js.js` too. That 1 rule also has a confirmed (not
+  theorized) string-literal false-positive risk not yet closed for JS/TS.
+  See "JS/TS support" and "Multi-provider support" below for exactly
+  what's been tested and what hasn't.
 
 ## Validated against
 
@@ -476,6 +478,46 @@ deprecated-model-string literal, etc. — see git history for the exact
 before/after JSON if you want to see the noise that got cut). Only tested
 against 2 real repos so far, not 6 like the Python side — this is
 explicitly a first pass, not yet hardened to the same degree.
+
+**Update (2026-09-11): one OpenAI rule added, closing the one real gap
+this file used to flag.** Went through openai-node's real `CHANGELOG.md`
+(~344 versions) the same way the Anthropic pass above did — only 2
+`⚠ BREAKING CHANGES` sections exist in its whole history, the same count
+`sync_rules.py`'s OpenAI parser already relies on for the Python side.
+One is included: `openai-v2-tool-call-output-type-widened`, same id as
+the Python rule of the same name (`ResponseFunctionToolCallOutputItem` /
+`ResponseCustomToolCallOutput`'s `.output` field widening from `string` to
+`string | Array<...>`) — API/response-shape level, not SDK-implementation
+level, so the same reasoning that included the shared Anthropic rules
+applies here too. The other, "require Node.js 22" (SDK v7.0.0), is
+explicitly excluded: that's a `package.json` `engines` requirement, not
+JS/TS *source code*, and this scanner only ever parses `.js`/`.ts` files —
+there's structurally nothing for it to match, same honest gap as the
+raw-HTTP blind spot elsewhere in this README, not an oversight.
+
+Tested for real, not just written and assumed correct: added
+`js_scanner/example_project/openai_bot.ts` (a real type import + a clean
+unrelated call, mirroring `example_project/openai_bot.py`'s Python
+fixture) — the rule fires exactly once, on the real import, and the clean
+call produces nothing extra. Also built a throwaway fixture with the type
+name only inside a `console.log` string, never a real import — **it
+false-positives**, confirming (not just theorizing) that this scanner has
+the same string-literal-matching gap already found and fixed on the
+Python side (see "Closing the string-literal gap in `generic_scan()`
+itself" below). Left unfixed here deliberately: porting an equivalent
+masking pass to Babel's AST is real, separate work, and this is currently
+the only rule in `rules_js.js` whose trigger text is a type name at all
+likely to show up in a log/comment string — none of the 10 Anthropic JS
+rules have shown this in testing so far. Tracked as open, not silently
+assumed fine.
+
+Also closed a second, older gap while here: `scan-js: "true"` (the
+composite action's JS/TS opt-in — Node setup, `npm install`,
+`ast_scan.js`) had never actually been exercised in a real GitHub Actions
+run before, only manually/locally. `self-check.yml` now has a job that
+runs it for real against `js_scanner/example_project/` and checks the new
+OpenAI rule fires by id — the first CI-covered proof the whole `scan-js`
+path works end-to-end, not just the rule content.
 
 ## Multi-provider support (OpenAI)
 

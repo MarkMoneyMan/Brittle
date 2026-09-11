@@ -1,5 +1,8 @@
 /**
- * rules_js.js — the JS/TS-applicable subset of rules.py's rule set.
+ * rules_js.js — the JS/TS-applicable subset of rules.py's rule set, plus
+ * (since 2026-09-11) one rule from rules_openai.py's — see the "OpenAI"
+ * block near the end of RULES_JS below for that addition and what was
+ * deliberately left out of it.
  *
  * Deliberately NOT a straight port of rules.py. Went through the same raw
  * changelog text (pipeline_runs/2026-08-27_changelog_input.txt +
@@ -7,7 +10,8 @@
  * confirmed to affect the TypeScript SDK, rather than assuming every
  * Python-flagged change applies equally.
  *
- * Two rule groups, based on what the changelog actually says:
+ * Two rule groups from the original Anthropic-only pass, based on what the
+ * changelog actually says:
  *
  * 1. API/request-level changes (the model or endpoint behaves this way no
  *    matter which language calls it): model deprecations/retirements,
@@ -135,6 +139,57 @@ const RULES_JS = [
     title: "computer_toolset_20260801 (GA) changes request shape vs. beta computer_20251124",
     detail: "The computer use tool is now GA as computer_toolset_20260801, changing request shape and tool handling vs. the beta computer_20251124.",
     fix: "Follow the migration guide before switching from computer_20251124 to computer_toolset_20260801.",
+  },
+
+  // --- OpenAI (added 2026-09-11) ---
+  //
+  // Went through openai-node's real CHANGELOG.md the same way the block
+  // above went through Anthropic's release notes: only 2 "⚠ BREAKING
+  // CHANGES" sections exist in its full ~344-version history (confirmed,
+  // same count sync_rules.py's OpenAI parser already relies on for the
+  // Python side — see that file's parse_dated_sections_openai docstring).
+  //
+  // Only one of the two is included here:
+  //   - v6.0.0 (2025-09-30): ResponseFunctionToolCallOutputItem.output /
+  //     ResponseCustomToolCallOutput.output widened from string to
+  //     string | Array<...>. Same id as rules_openai.py's Python version
+  //     of this rule (openai-v2-tool-call-output-type-widened) — API/
+  //     response-shape level, not SDK-implementation level, so it applies
+  //     regardless of language, same reasoning as the shared Anthropic
+  //     rules above.
+  //
+  // Explicitly EXCLUDED, and why: v7.0.0 (2026-07-27), "require Node.js 22
+  // and codify version support." Real breaking change, but there's no
+  // source-code call site for it to match — it's a runtime/engines
+  // requirement declared in package.json, not JavaScript/TypeScript code
+  // at all, and this scanner only parses .js/.ts files (see walkDir
+  // below). A future rule format that also reads package.json's "engines"
+  // field could close this; nothing like that exists yet. Same honest
+  // "no invented rule for something this scanner structurally can't see"
+  // choice as the raw-HTTP blind spot documented in the README.
+  //
+  // Known gap, CONFIRMED not just theorized: unlike ast_scan.py's
+  // generic_scan(), this JS/TS scanner has no string-literal-masking pass
+  // yet (see README's "Closing the string-literal gap in generic_scan()
+  // itself" — that fix was Python-only). Built a throwaway fixture with
+  // the type name only inside a console.log string, never a real import
+  // or type reference — it false-positives, exactly the same bug class
+  // already fixed on the Python side. Left unfixed here deliberately (not
+  // an oversight): porting _mask_string_literals-equivalent masking to
+  // Babel's AST is real, separate work, and this is currently the only
+  // rule in RULES_JS whose trigger text (a type name) is remotely likely
+  // to show up in a log/comment string — none of the Anthropic JS rules
+  // above have shown this in testing so far. See README's "JS/TS support"
+  // section for the tracking note.
+  {
+    id: "openai-v2-tool-call-output-type-widened",
+    pattern: /ResponseFunctionToolCallOutputItem|ResponseCustomToolCallOutput/,
+    appliesIfModel: null,
+    severity: "MEDIUM",
+    deadline: "2025-09-30 (SDK v6.0.0)",
+    title: "SDK v6.0.0 widens tool-call output's type from string to string | array",
+    detail: "ResponseFunctionToolCallOutputItem.output and ResponseCustomToolCallOutput.output changed from always being a plain string to string | Array<ResponseInputText | ResponseInputImage | ResponseInputFile>. Code that assumes .output is always a string (e.g. passing it straight into a string-only function, or indexing into it like a string) can break or misbehave silently once a caller starts sending back structured content.",
+    fix: "Check the type of .output at runtime (typeof === 'string' vs. Array.isArray) before treating it as plain text.",
   },
 ];
 

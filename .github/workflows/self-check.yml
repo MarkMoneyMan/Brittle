@@ -1,17 +1,19 @@
 name: self-check
 
-# Dogfoods action.yml against this repo itself, on every push/PR. Five
+# Dogfoods action.yml against this repo itself, on every push/PR. Six
 # jobs, all really assertions about the tool's own correctness (not about
 # this repo's code health): one path is known to contain real Anthropic-
 # rule findings and must fail the severity gate, one specifically checks
-# the OpenAI rules by name (not just "some rule fired" — see that job's
-# comment for why), one path is known to be clean and must pass the gate,
-# one installs the pip package (pyproject.toml) fresh and checks the
+# the OpenAI (Python) rules by name (not just "some rule fired" — see that
+# job's comment for why), one path is known to be clean and must pass the
+# gate, one installs the pip package (pyproject.toml) fresh and checks the
 # installed console scripts behave the same as running the scripts
-# directly, and one is a permanent regression test for the string-literal
+# directly, one is a permanent regression test for the string-literal
 # false-positive gap closed on 2026-09-11 (see README's "Closing the
-# string-literal gap in generic_scan() itself"). If any assumption stops
-# holding, that's a regression to fix, not a real finding to triage.
+# string-literal gap in generic_scan() itself"), and one checks the OpenAI
+# JS/TS rule by name AND is the first CI-covered proof scan-js: "true"
+# works at all. If any assumption stops holding, that's a regression to
+# fix, not a real finding to triage.
 
 on:
   push:
@@ -134,6 +136,35 @@ jobs:
             fi
           done
           echo "OK: exactly the 3 exempted rules fired, and none of the 9 previously-fixed rules matched string-literal content."
+
+  expect-openai-js-rule-fires-on-js-fixture:
+    # Also the first CI-covered proof that inputs.scan-js: "true" actually
+    # works end-to-end in a real Actions run at all (action.yml's JS/TS
+    # path — Node setup, npm install, ast_scan.js — was previously only
+    # ever exercised manually/locally; see README's "JS/TS support").
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run claude-api-guard (with scan-js) against js_scanner/example_project/ (known findings, both providers)
+        id: scan
+        continue-on-error: true
+        uses: ./
+        with:
+          path: js_scanner/example_project
+          scan-js: "true"
+          fail-on: HIGH
+      - name: Assert the severity gate failed AND the OpenAI JS/TS rule actually fired
+        run: |
+          if [ "${{ steps.scan.outcome }}" != "failure" ]; then
+            echo "::error::Expected the HIGH-severity gate to fail against js_scanner/example_project/ (bot.ts has known HIGH findings), but the step outcome was '${{ steps.scan.outcome }}'."
+            exit 1
+          fi
+          json_path="${{ steps.scan.outputs.findings-json }}"
+          if ! grep -q "\"openai-v2-tool-call-output-type-widened\"" "$json_path"; then
+            echo "::error::Expected rule_id 'openai-v2-tool-call-output-type-widened' in $json_path (openai_bot.ts's real type import at line 7) but it wasn't there — check rules_js.js's OpenAI block and that scan-js: \"true\" actually ran the JS/TS scanner."
+            exit 1
+          fi
+          echo "OK: gate correctly failed, and the OpenAI JS/TS rule fired on openai_bot.ts as expected."
 
   package-installs-and-runs:
     runs-on: ubuntu-latest

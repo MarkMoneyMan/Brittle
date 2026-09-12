@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run claude-api-guard against example_project/ (known to have findings)
+      - name: Run Brittle against example_project/ (known to have findings)
         id: scan
         uses: ./
         continue-on-error: true
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run claude-api-guard against example_project/openai_bot.py (known OpenAI-rule findings)
+      - name: Run Brittle against example_project/openai_bot.py (known OpenAI-rule findings)
         id: scan
         continue-on-error: true
         uses: ./
@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run claude-api-guard against example_project/gemini_bot.py (known Gemini-rule finding)
+      - name: Run Brittle against example_project/gemini_bot.py (known Gemini-rule finding)
         id: scan
         continue-on-error: true
         uses: ./
@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run claude-api-guard against ci_fixtures/known_clean.py (should be clean)
+      - name: Run Brittle against ci_fixtures/known_clean.py (should be clean)
         id: scan
         uses: ./
         with:
@@ -185,7 +185,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run claude-api-guard (with scan-js) against js_scanner/example_project/ (known findings, all providers)
+      - name: Run Brittle (with scan-js) against js_scanner/example_project/ (known findings, all providers)
         id: scan
         continue-on-error: true
         uses: ./
@@ -219,12 +219,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install claude-api-guard from this checkout (pyproject.toml)
+      - name: Install Brittle from this checkout (pyproject.toml)
         run: pip install .
-      - name: Run the installed claude-api-guard-scan against example_project/
+      - name: Run the installed brittle-scan against example_project/
         id: scan
         continue-on-error: true
-        run: claude-api-guard-scan example_project/ --json installed_scan_findings.json
+        run: brittle-scan example_project/ --json installed_scan_findings.json
       - name: Assert it found the known HIGH findings from ALL THREE providers (nonzero exit, not a crash)
         run: |
           # Real bug, found on a real Actions run (not hypothetical): this
@@ -241,7 +241,7 @@ jobs:
           # pyproject.toml's py-modules the same commit it was created,
           # instead of finding out the hard way like rules_openai.py did.
           if [ "${{ steps.scan.outcome }}" != "failure" ]; then
-            echo "::error::Expected the installed claude-api-guard-scan to exit non-zero against example_project/ (it has known findings), but the step outcome was '${{ steps.scan.outcome }}'."
+            echo "::error::Expected the installed brittle-scan to exit non-zero against example_project/ (it has known findings), but the step outcome was '${{ steps.scan.outcome }}'."
             exit 1
           fi
           if [ ! -s installed_scan_findings.json ]; then
@@ -255,12 +255,12 @@ jobs:
             fi
           done
           echo "OK: installed console script found and reported the known findings from all three providers."
-      - name: Assert the installed claude-api-guard-autofix produces a working patch
+      - name: Assert the installed brittle-autofix produces a working patch
         run: |
           cp example_project/autofix_test.py /tmp/autofix_smoke_test.py
-          claude-api-guard-autofix /tmp/autofix_smoke_test.py --write
+          brittle-autofix /tmp/autofix_smoke_test.py --write
           if diff -q example_project/autofix_test.py /tmp/autofix_smoke_test.py > /dev/null; then
-            echo "::error::Expected claude-api-guard-autofix to change /tmp/autofix_smoke_test.py, but it made no edits."
+            echo "::error::Expected brittle-autofix to change /tmp/autofix_smoke_test.py, but it made no edits."
             exit 1
           fi
           python3 -c "import ast; ast.parse(open('/tmp/autofix_smoke_test.py').read())"

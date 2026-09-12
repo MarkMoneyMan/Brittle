@@ -1,7 +1,9 @@
 """
 Rule database for OpenAI Python SDK breaking changes — the first step of
-turning claude-api-guard from "guards your Anthropic calls" into "guards
-your LLM API calls," a much bigger addressable set of real codebases.
+turning this project (named claude-api-guard at the time, renamed Brittle
+on 2026-09-12 once it stopped being Claude-only) from "guards your
+Anthropic calls" into "guards your LLM API calls," a much bigger
+addressable set of real codebases.
 
 Hand-extracted from OpenAI's real, currently-live sources (checked
 2026-08-31), same manual-stand-in-for-extract_rules.py approach rules.py

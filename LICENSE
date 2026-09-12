@@ -3,7 +3,7 @@ Business Source License 1.1
 Parameters
 
 Licensor:             Markus Ø. Kamper
-Licensed Work:        claude-api-guard
+Licensed Work:        Brittle
                       The Licensed Work is (c) 2026 Markus Ø. Kamper
 Additional Use Grant: You may use, copy, modify, self-host, and make
                       production use of the Licensed Work for any
@@ -79,7 +79,7 @@ made available under an Open Source license (the MIT License), as
 stated in this License, on the Change Date above. Until then: you can
 read this code, run it, self-host it, modify it, and build on it for
 your own use (including commercial use) freely — the one thing this
-license reserves is standing up claude-api-guard itself as a
+license reserves is standing up Brittle itself as a
 competing paid hosted service before the Change Date.
 
 License text adapted from the Business Source License 1.1 template

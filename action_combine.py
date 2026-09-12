@@ -44,15 +44,15 @@ def main():
     findings = load_findings(args.files)
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f["severity"], 9), f["file"], f["line"]))
 
-    out_path = Path("claude-api-guard-findings.json")
+    out_path = Path("brittle-findings.json")
     out_path.write_text(json.dumps(findings, indent=2))
 
     if findings:
-        print(f"claude-api-guard: {len(findings)} finding(s):\n")
+        print(f"brittle: {len(findings)} finding(s):\n")
         for f in findings:
             print(f"[{f['severity']}] {f['file']}:{f['line']}  {f['title']}")
     else:
-        print("claude-api-guard: no known Claude API breaking changes detected.")
+        print("brittle: no known Claude/OpenAI/Gemini API breaking changes detected.")
 
     gh_output = os.environ.get("GITHUB_OUTPUT")
     if gh_output:

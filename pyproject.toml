@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-api-guard"
+name = "brittle"
 version = "0.1.0"
-description = "Detect and auto-fix Claude/Anthropic API breaking changes in Python code."
+description = "Detect and auto-fix Claude/Anthropic, OpenAI, and Gemini API breaking changes in Python code. (Renamed from claude-api-guard on 2026-09-12, back when it only covered Anthropic.)"
 readme = "README.md"
 requires-python = ">=3.9"
 # Business Source License 1.1, not a standard OSI-approved license, so
@@ -15,10 +15,10 @@ requires-python = ">=3.9"
 license = { file = "LICENSE" }
 
 [project.scripts]
-claude-api-guard-scan = "ast_scan:main"
-claude-api-guard-autofix = "autofix:main"
+brittle-scan = "ast_scan:main"
+brittle-autofix = "autofix:main"
 
-# Flat top-level modules, not a claude_api_guard/ subpackage — deliberate,
+# Flat top-level modules, not a brittle/ subpackage — deliberate,
 # not an oversight. rules.py, ast_scan.py, and autofix.py already import
 # each other with bare names (`from rules import RULES`, `from ast_scan
 # import ...`), and action.yml + self-check.yml + sync_rules.py all run
@@ -29,8 +29,8 @@ claude-api-guard-autofix = "autofix:main"
 # top-level module names that could collide with something else on
 # whatever environment installs this. Acceptable for now because the only
 # realistic install path is a fresh, ephemeral CI job installing straight
-# from this private git repo (see README's "Packaging" section) — not a
-# shared environment — but a real `claude_api_guard/` package layout
+# from this git repo (see README's "Packaging" section) — not a
+# shared environment — but a real `brittle/` package layout
 # would be the right fix before this goes any wider than that.
 #
 # rules_openai.py added here the moment ast_scan.py started importing it

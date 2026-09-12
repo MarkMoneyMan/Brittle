@@ -79,7 +79,7 @@ GEMINI_VERSION_HEADER_RE = re.compile(
 
 def fetch_url(url):
     """Plain GET, no auth — every source here is a public page."""
-    req = urllib.request.Request(url, headers={"User-Agent": "claude-api-guard/sync_rules.py"})
+    req = urllib.request.Request(url, headers={"User-Agent": "brittle/sync_rules.py"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return resp.read().decode("utf-8")
 

@@ -2,7 +2,7 @@
 __pycache__/
 *.pyc
 report*.json
-claude-api-guard-findings.json
+brittle-findings.json
 py_findings.json
 js_findings.json
 
@@ -10,5 +10,8 @@ js_findings.json
 build/
 *.egg-info/
 
-# Local GitHub token for non-interactive push (never committed)
+# Local GitHub token for non-interactive push (never committed) — this
+# only exists on the device copy, but keeping the entry here too so a
+# future cloud->device .gitignore sync doesn't drop it again (it did,
+# once — see git history).
 .github_token

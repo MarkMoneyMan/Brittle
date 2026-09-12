@@ -1,24 +1,21 @@
-# TEMPLATE — how a downstream project (e.g. OddsScanner) uses
-# claude-api-guard now that it's published at
-# github.com/MarkMoneyMan/Claude-api-goat.
+# TEMPLATE — how a downstream project (e.g. OddsScanner) uses Brittle
+# (renamed from claude-api-guard on 2026-09-12) now that it's published at
+# github.com/MarkMoneyMan/brittle.
 #
 # Copy this into that project's own .github/workflows/.
 #
-# Caveat, stated plainly: Claude-api-goat is currently a PRIVATE repo.
-# GitHub only lets a private repo's Action be referenced (`uses:`) from
-# another repo when both repos are in the same account/org, or when the
-# calling repo has explicitly been granted access under Settings →
-# Actions → General → "Access" on Claude-api-goat. A public downstream
-# repo, or one under a different account, can't use `uses:` against a
-# private repo at all — for that, Claude-api-goat itself would need to be
-# made public. OddsScanner is under the same account, so this works as-is
-# there without any extra step.
+# Note, corrected 2026-09-12: this file used to warn that the repo was
+# private and describe the same-account/explicit-Access workarounds needed
+# for a private repo's Action to be referenced from elsewhere. That's no
+# longer true — the repo is public — so `uses: MarkMoneyMan/brittle@master`
+# below works from any repo, same account or not, no extra Settings step
+# needed.
 #
-# What it does: on every PR, flags Claude API usage that's broken or about
-# to break. Fails the check only on HIGH severity by default so a MEDIUM/LOW
-# heads-up doesn't block merging.
+# What it does: on every PR, flags Claude/OpenAI/Gemini API usage that's
+# broken or about to break. Fails the check only on HIGH severity by
+# default so a MEDIUM/LOW heads-up doesn't block merging.
 
-name: claude-api-guard check
+name: Brittle check
 
 on:
   pull_request:
@@ -30,8 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: MarkMoneyMan/Claude-api-goat@master
+      - uses: MarkMoneyMan/brittle@master
         with:
           path: .
           fail-on: HIGH
-          # scan-js: "true"   # uncomment if this repo also has JS/TS Anthropic SDK usage
+          # scan-js: "true"   # uncomment if this repo also has JS/TS Anthropic/OpenAI/Gemini SDK usage

@@ -1,4 +1,8 @@
-# claude-api-guard
+# Brittle
+
+*Renamed from claude-api-guard on 2026-09-12, once "guards your Claude
+calls" stopped describing what it actually does — see "Multi-provider
+support" below for why.*
 
 A GitHub Action that scans your codebase for usage of the Claude/Anthropic,
 OpenAI, and Gemini APIs that's broken, or about to break, because of a
@@ -15,7 +19,7 @@ swapped, a response shape gets renamed — and the first anyone hears about
 it is a production error, not a changelog. This tool is meant to be the
 thing that catches that in CI, before it ships.
 
-**Where it's strongest right now, and where it's headed:** claude-api-guard
+**Where it's strongest right now, and where it's headed:** Brittle
 started as, and is still deepest on, Anthropic's Claude API — every rule is
 validated against real downstream code (not just written and assumed
 correct; see the engineering log below for the actual false positives found
@@ -45,10 +49,10 @@ proposed rule still goes through a human-reviewed PR before it's live — see
 ## Quick start
 
 Add this to a workflow file in the repo you want to protect (e.g.
-`.github/workflows/claude-api-guard.yml`):
+`.github/workflows/brittle.yml`):
 
 ```yaml
-name: claude-api-guard check
+name: Brittle check
 on:
   pull_request:
   push:
@@ -59,11 +63,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: MarkMoneyMan/Claude-api-goat@master
+      - uses: MarkMoneyMan/brittle@master
         with:
           path: .
           fail-on: HIGH        # MEDIUM/LOW findings are reported but won't fail the job
-          # scan-js: "true"    # also scan JS/TS files for Anthropic SDK usage
+          # scan-js: "true"    # also scan JS/TS files for Anthropic/OpenAI/Gemini SDK usage
 ```
 
 That's it — no secrets, no config file, no signup. It fails the job only on
@@ -71,15 +75,16 @@ HIGH-severity findings by default, so a heads-up doesn't block a merge the
 way a real break should. See `examples/consumer-workflows/` for a weekly
 auto-fix variant that opens a PR for the mechanical fixes on its own.
 
-Covers Python (Anthropic + OpenAI SDKs) and, as a first pass, JS/TS
-(Anthropic SDK only so far) — see "Known limitations" below for exactly
+Covers Python (Anthropic + OpenAI + Gemini SDKs) and, as a first pass,
+JS/TS (Anthropic + 1 OpenAI rule + 1 Gemini rule so far) — see "Known
+limitations" below for exactly
 what is and isn't covered yet.
 
 ## License
 
 Business Source License 1.1 (see `LICENSE`) — free to read, run, self-host,
 modify, and build on for your own use, including commercial use. The one
-thing it reserves is standing up claude-api-guard itself as a competing
+thing it reserves is standing up Brittle itself as a competing
 paid hosted service before 2030-09-01, at which point it converts
 automatically to the MIT License. This is not a restriction on *using* the
 tool to protect your own project — that's unrestricted from day one.
@@ -374,18 +379,22 @@ single file actually hit it.
 
 `autofix-weekly.yml` used to check out this tool's *whole repo* into a
 subfolder next to the consumer project, just to reach one file
-(`claude-api-guard-tool/autofix.py`) — noted at the time as a known gap.
-Closed now: `pyproject.toml` packages `rules.py`, `ast_scan.py`, and
-`autofix.py` as an installable `claude-api-guard` package with two
-console-script entry points, `claude-api-guard-scan` and
-`claude-api-guard-autofix`. `autofix-weekly.yml` now does `pip install
-"git+https://x-access-token:${TOKEN}@github.com/MarkMoneyMan/Claude-api-goat.git@master"`
-and runs `claude-api-guard-autofix repo --write` — one step instead of
-two, and no more reaching into a sibling checkout's file path by hand.
+(`claude-api-guard-tool/autofix.py`, back when the project was still named
+claude-api-guard — see the top of this README for the 2026-09-12 rename)
+— noted at the time as a known gap. Closed now: `pyproject.toml` packages
+`rules.py`, `ast_scan.py`, and `autofix.py` as an installable package with
+two console-script entry points — named `claude-api-guard`/
+`claude-api-guard-scan`/`claude-api-guard-autofix` at the time, renamed to
+`brittle`/`brittle-scan`/`brittle-autofix` in the same commit as everything
+else. `autofix-weekly.yml` now does `pip install
+"git+https://github.com/MarkMoneyMan/brittle.git@master"` (no token needed
+— the repo is public) and runs `brittle-autofix repo --write` — one step
+instead of two, and no more reaching into a sibling checkout's file path by
+hand.
 
 **One deliberate tradeoff, stated plainly rather than hidden:** the
 package is flat top-level modules (`rules`, `ast_scan`, `autofix`), not
-a `claude_api_guard/` namespace package. That's not an oversight — those
+a `brittle/` namespace package. That's not an oversight — those
 three files already import each other with bare names
 (`from rules import RULES`, `from ast_scan import ...`), and `action.yml`
 + `self-check.yml` + `sync_rules.py` all already run them as plain
@@ -394,8 +403,8 @@ changes and zero risk to any of that already-working, already-tested
 machinery — the actual cost is that "rules", "ast_scan", and "autofix"
 are generic names that could collide with something else in a shared
 Python environment. Acceptable here because the only realistic install
-path is a fresh, ephemeral CI job installing straight from this private
-repo, not a shared environment — but a real `claude_api_guard/` layout
+path is a fresh, ephemeral CI job installing straight from this
+repo, not a shared environment — but a real `brittle/` layout
 (with relative imports, and `action.yml`/`sync_rules.py` updated to
 match) would be the right fix before this goes anywhere wider than that.
 
@@ -403,8 +412,8 @@ match) would be the right fix before this goes anywhere wider than that.
 (`pip install -e .` first, then `pip install .` to mirror what CI
 actually does) and run from a directory with no copy of this repo in it
 at all — both console scripts produced byte-identical results to running
-the scripts directly (`claude-api-guard-scan` found the same 4 known
-`example_project/` findings and exited 1; `claude-api-guard-autofix`
+the scripts directly (`brittle-scan` found the same 4 known
+`example_project/` findings and exited 1; `brittle-autofix`
 produced the same 7 edits against a copy of `autofix_test.py`, and the
 patched file still parsed). `self-check.yml` gained a third job,
 `package-installs-and-runs`, that runs this exact same check on every
@@ -1178,9 +1187,9 @@ of someone running `ast_scan.py` by hand and remembering to. Two pieces:
   a weekly `autofix-weekly.yml` that opens a PR via the well-established
   `peter-evans/create-pull-request` action when `autofix.py` finds
   something to fix) showing how a *downstream* project would wire this
-  in. Now point at the real `MarkMoneyMan/Claude-api-goat@master`
-  instead of a placeholder — see "Publishing" below for the access
-  caveats that come with that repo being private.
+  in. Point at the real `MarkMoneyMan/brittle@master` instead of a
+  placeholder — see "Publishing" below for how that reference (and the
+  repo's name and visibility) got there.
 
 **What's validated and what isn't, stated plainly:** all 4 YAML files
 parse as valid YAML, and the Python logic each step actually calls
@@ -1207,30 +1216,46 @@ existed to find because a real run happened.
 
 ## Publishing
 
-Published to a real (private) GitHub repository:
+Published to a real GitHub repository, originally private:
 `github.com/MarkMoneyMan/Claude-api-goat`. Getting there needed two
 rounds of Personal Access Token permission fixes — GitHub refuses to let
 a token without "Workflows" scope push changes to `.github/workflows/*`,
 even if it already has "Contents: Read and write" — which isn't obvious
 until the push is rejected with that exact error.
 
-Both consumer-workflow templates now point at the real
+Both consumer-workflow templates were pointed at the real
 `MarkMoneyMan/Claude-api-goat@master` instead of the old
-`YOUR-GITHUB-USERNAME` placeholder, but "private" isn't free to work
-around — two different mechanisms are involved, and they were kept
-separate deliberately rather than papered over:
+`YOUR-GITHUB-USERNAME` placeholder, but "private" wasn't free to work
+around at the time — two different mechanisms were involved, and they
+were kept separate deliberately rather than papered over:
 
 - `check-on-pr.yml`'s `uses: MarkMoneyMan/Claude-api-goat@master` (an
-  *action reference*) works for a same-account repo like OddsScanner with
+  *action reference*) worked for a same-account repo like OddsScanner with
   no extra setup — GitHub's repo Settings → Actions → General → "Access"
-  on Claude-api-goat covers this case, and same-account repos get it by
+  on Claude-api-goat covered this case, and same-account repos got it by
   default.
 - `autofix-weekly.yml`'s `actions/checkout` step with
   `repository: MarkMoneyMan/Claude-api-goat` (*cloning a second repo's
-  contents*, to get `autofix.py` itself) is a different mechanism — the
+  contents*, to get `autofix.py` itself) was a different mechanism — the
   default `GITHUB_TOKEN` a workflow run gets is scoped only to the repo
-  it's running in, same-account or not. That step needs a `token:` input
-  pointing at a PAT (read-only "Contents" scope on Claude-api-goat is
-  enough) stored as a secret in the *downstream* repo. Not yet set up in
-  OddsScanner — that's the actual remaining step now, not the placeholder
-  swap.
+  it's running in, same-account or not. That step needed a `token:` input
+  pointing at a PAT (read-only "Contents" scope on Claude-api-goat was
+  enough) stored as a secret in the *downstream* repo.
+
+**Update (2026-09-12): both of those caveats are gone, for unrelated
+reasons, not because anyone went and set up the workaround above.** The
+repo was made public at some point before this update (not tracked here
+exactly when — worth noting as a small process gap: a change like that
+should have gotten its own log entry at the time it happened, not been
+noticed in passing while writing an unrelated section), which makes the
+whole private-repo access dance above moot: `uses:` and `git clone`/
+`pip install` against a public repo need no token and no same-account
+relationship at all. Separately, the repo was renamed from
+`claude-api-guard`/`Claude-api-goat` to **Brittle**
+(`github.com/MarkMoneyMan/brittle`) — see the top of this README for why.
+Every reference in this README, `action.yml`, `pyproject.toml`, and the
+consumer-workflow templates was updated to the new name and the simpler
+public-repo setup in the same pass; the account-token debugging story
+above is kept as-written because it's a real thing that happened and is
+useful context for anyone hitting the same "Workflows scope" error on a
+still-private repo of their own.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-claude-api-guard — a tiny proof-of-concept "self-maintaining API" scanner.
+Brittle (originally claude-api-guard) — a tiny proof-of-concept
+"self-maintaining API" scanner.
 
 Walks a codebase, finds usage of the Anthropic/Claude API, and flags any
 code that's about to break (or is already broken) because of a known,

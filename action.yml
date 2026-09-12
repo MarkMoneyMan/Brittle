@@ -1,10 +1,11 @@
-name: "claude-api-guard"
+name: "Brittle"
 description: >
   Scans a Python (and optionally JS/TS) codebase for usage of the
-  Claude/Anthropic API that's broken, or about to break, because of a
-  known, dated API change. Detection only by default — see the separate
-  autofix step below for the 5 rules that can be safely auto-patched.
-author: "claude-api-guard prototype"
+  Claude/Anthropic, OpenAI, or Gemini APIs that's broken, or about to
+  break, because of a known, dated API change. Detection only by
+  default — see the separate autofix step below for the 5 rules that can
+  be safely auto-patched.
+author: "MarkMoneyMan"
 
 inputs:
   path:

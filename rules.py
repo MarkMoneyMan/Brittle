@@ -232,3 +232,50 @@ NEW_RULES = [
 ]
 
 RULES = RULES + NEW_RULES
+
+
+# --- Auto-extracted by sync_rules.py from release notes through 2026-09-10 ---
+RULES_AUTO_20260910 = [
+    {
+        'id': 'fable-5-1-tool-choice-any-tool-unsupported',
+        'pattern': 'tool_choice[\'"]?\\s*[:=]\\s*[\'"]?(any|tool)[\'"]?|["\']type["\']\\s*:\\s*["\'](any|tool)["\']',
+        'applies_if_model': ['claude-fable-5-1', 'claude-mythos-5-1'],
+        'severity': 'HIGH',
+        'deadline': 'already active',
+        'title': "tool_choice types 'any' and 'tool' return 400 on Fable 5.1 and Mythos 5.1",
+        'detail': 'On Claude Fable 5.1 and Claude Mythos 5.1, setting `tool_choice` to type `any` or `tool` is not supported and will return a 400 error. Only `auto` and `none` remain valid values for `tool_choice` on these models.',
+        'fix': "Switch to `tool_choice: {type: 'auto'}` or `tool_choice: {type: 'none'}`, and use strict tool use or structured outputs if you need schema-conformant tool inputs.",
+    },
+    {
+        'id': 'fable-5-1-thinking-block-prefix-mismatch-400',
+        'pattern': r"thinking|thinking_block|thinking_content",
+        'applies_if_model': ['claude-fable-5-1', 'claude-mythos-5-1'],
+        'severity': 'HIGH',
+        'deadline': '2026-08-31',
+        'title': 'Replaying thinking blocks after system/tools/message change returns 400 for accounts created on or after August 31, 2026',
+        'detail': 'On Claude Fable 5.1, for accounts created on or after August 31, 2026, if a thinking block is replayed in a conversation where the `system` prompt, `tools`, or an earlier message has changed, the API returns a 400 error. Thinking blocks produced by Fable 5.1 are also silently dropped if replayed to an earlier (older) model.',
+        'fix': 'Do not replay thinking blocks when the system prompt, tools list, or any prior message has been modified; strip thinking blocks before sending to older models, or use the `thinking-binding-controls-2026-08-01` beta header to control drop/reject behavior.',
+    },
+    {
+        'id': 'fable-5-1-thinking-blocks-dropped-on-older-models',
+        'pattern': r"thinking|thinking_block|thinking_content",
+        'applies_if_model': ['claude-fable-5-1', 'claude-mythos-5-1'],
+        'severity': 'MEDIUM',
+        'deadline': 'already active',
+        'title': 'Thinking blocks from Fable 5.1/Mythos 5.1 are silently dropped when replayed to an older model',
+        'detail': 'Thinking blocks produced by Claude Fable 5.1 or Mythos 5.1 cannot be read by earlier models; if such a block is replayed to an earlier model, the API silently drops it without an error by default. This silent discard could cause misbehavior in multi-turn agentic pipelines that pass thinking blocks across model versions.',
+        'fix': 'Ensure thinking blocks produced by Fable 5.1 or Mythos 5.1 are only replayed to the same or a newer model, or use the `thinking-binding-controls-2026-08-01` beta header to receive explicit drop notifications via `input_transformations`.',
+    },
+    {
+        'id': 'enterprise-endpoints-require-anthropic-version-header',
+        'pattern': r"(?:admin|analytics|compliance)[_-]?(?:api|client)|AdminAPI|AnalyticsAPI|ComplianceAPI|/v1/(?:users|spend.limits|analytics|compliance)",
+        'applies_if_model': None,
+        'severity': 'MEDIUM',
+        'deadline': 'already active',
+        'title': 'Claude Enterprise Admin, Analytics, and Compliance API endpoints now require the anthropic-version header',
+        'detail': 'The guides for Claude Enterprise endpoints (Admin API, Analytics API, and Compliance API) now document a required `anthropic-version` header that must be sent on every request, consistent with the rest of the Claude API. Existing code calling these endpoints without this header may start failing.',
+        'fix': 'Add the `anthropic-version` header to all requests made to the Admin API, Analytics API, and Compliance API endpoints, matching the pattern used for other Claude API calls.',
+    },
+]
+
+RULES = RULES + RULES_AUTO_20260910

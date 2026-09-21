@@ -1,11 +1,11 @@
 {
   "anthropic": {
-    "last_synced_date": "2026-08-27"
-  },
-  "openai": {
-    "last_synced_date": "2026-08-27"
+    "last_synced_date": "2026-09-18"
   },
   "gemini": {
     "last_synced_date": "2026-09-11"
+  },
+  "openai": {
+    "last_synced_date": "2026-08-27"
   }
 }

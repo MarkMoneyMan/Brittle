@@ -180,3 +180,32 @@ RULES_OPENAI = [
         "fix": "Catch openai.BadRequestError instead of openai.InvalidRequestError; review broad OpenAIError handlers against the current exception hierarchy.",
     },
 ]
+
+
+# --- Auto-extracted by sync_rules.py from release notes through 2026-10-22 ---
+RULES_OPENAI_AUTO_20261022 = [
+    {
+        'id': 'decisions-instructions-type-change',
+        'pattern': r"question\.instructions\s*(?:\.|\[|\+|\%|format|encode|split|strip|replace|lower|upper|startswith|endswith|join|len\()",
+        'applies_if_model': None,
+        'severity': 'HIGH',
+        'deadline': '2026-10-22',
+        'title': 'Decisions question.instructions changed from str to str | list of structured parts',
+        'detail': 'In Live response models, the `instructions` field on a Decisions question can now be either a plain string or a list of structured parts (text, image, or JSON). Code that unconditionally applies string operations to `question.instructions` will break or misbehave when the structured list form is returned.',
+        'fix': 'Add an `isinstance(question.instructions, str)` guard before any string operations, and add a handler for the list-of-parts case.',
+        'provider': 'openai',
+    },
+    {
+        'id': 'decisions-input-exhaustive-type-checks',
+        'pattern': r"DecisionInputMessageParam|DecisionInput(?:Message)?\b",
+        'applies_if_model': None,
+        'severity': 'MEDIUM',
+        'deadline': '2026-10-22',
+        'title': 'Decisions request input types now include additional message roles and tool-history items',
+        'detail': 'The Decisions request input types have been expanded to include additional message roles and tool-history items. Any exhaustive type checks (e.g. if/elif chains or match statements) over Decisions input union types that assume only the previous set of members will silently miss or error on the new variants.',
+        'fix': 'Update all exhaustive type checks on Decisions input types to handle the new message roles and tool-history item variants, adding a fallback branch for unknown types.',
+        'provider': 'openai',
+    },
+]
+
+RULES_OPENAI = RULES_OPENAI + RULES_OPENAI_AUTO_20261022

@@ -117,3 +117,32 @@ RULES_GEMINI = [
         ),
     },
 ]
+
+
+# --- Auto-extracted by sync_rules.py from release notes through 2026-11-06 ---
+RULES_GEMINI_AUTO_20261106 = [
+    {
+        'id': 'default-api-version-v1beta-to-v1',
+        'pattern': r"genai\.Client\s*\(",
+        'applies_if_model': None,
+        'severity': 'HIGH',
+        'deadline': '2026-11-06',
+        'title': 'Default Gemini Developer API version changed from v1beta to v1',
+        'detail': 'Clients using the Gemini Developer API (non-Vertex) now default to API version v1 instead of v1beta. Features or endpoints that exist only in v1beta will no longer be reachable by default, potentially causing errors or unexpected behavior in existing code that relied on v1beta functionality. Vertex AI clients are unaffected.',
+        'fix': "Set `GOOGLE_GENAI_API_VERSION=v1beta` or pass `http_options=types.HttpOptions(api_version='v1beta')` when constructing your `genai.Client` to restore the previous behavior.",
+        'provider': 'gemini',
+    },
+    {
+        'id': 'httpx-replaced-by-httpx2-default',
+        'pattern': r"import\s+httpx(?!2)",
+        'applies_if_model': None,
+        'severity': 'HIGH',
+        'deadline': '2026-11-06',
+        'title': 'Default HTTP client switched from httpx to httpx2; httpx no longer installed by default',
+        'detail': 'The SDK now depends on httpx2 instead of httpx, so any code that imports httpx directly, passes httpx-specific objects (Timeout, Limits, transports, Auth subclasses) via HttpOptions, or catches httpx transport exceptions will break unless the httpx extra is explicitly installed. SSL certificate handling also changes: httpx2 uses the OS trust store rather than certifi by default.',
+        'fix': "Run `pip install 'google-genai[httpx]'` and set `GOOGLE_GENAI_HTTP_CLIENT=httpx` to keep using httpx, or update your code to use httpx2 (typically `import httpx2 as httpx` is sufficient for most cases).",
+        'provider': 'gemini',
+    },
+]
+
+RULES_GEMINI = RULES_GEMINI + RULES_GEMINI_AUTO_20261106
